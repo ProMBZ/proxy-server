@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch'); // This is how node-fetch is typically imported for older Node.js versions
+const axios = require('axios'); // Changed from node-fetch to axios
 require('dotenv').config();
 
 const app = express();
@@ -42,43 +42,59 @@ app.use('/api', async (req, res) => {
     // For example, some APIs might expect a specific User-Agent
     // headers['User-Agent'] = 'Custom-Vapi-Proxy/1.0'; 
 
-    // Prepare request body for methods that typically send one (POST, PUT, PATCH)
-    let requestBody = undefined;
-    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-        requestBody = JSON.stringify(req.body);
-    }
-
     try {
-        // Make the actual request to the SFD API
-        const response = await fetch(targetUrl, {
+        // Axios handles different methods and data automatically
+        const axiosConfig = {
             method: req.method,
+            url: targetUrl,
             headers: headers,
-            body: requestBody,
-            redirect: 'follow', // Important: follow redirects if the SFD API sends them
-            timeout: 15000 // Increased timeout for potentially slow responses (15 seconds)
-        });
+            timeout: 15000, // 15 seconds timeout
+            validateStatus: function (status) {
+                return status >= 200 && status < 500; // Do not throw error for 4xx responses, let the error handling logic below catch it if needed.
+            }
+        };
+
+        // For POST, PUT, PATCH, attach the request body
+        if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            axiosConfig.data = req.body; // Axios will JSON.stringify this automatically if content-type is application/json
+        }
+
+        const response = await axios(axiosConfig);
 
         console.log(`Received response status from SFD: ${response.status}`);
-        // console.log(`Received response headers from SFD: `, response.headers.raw()); 
 
-        // Copy all headers from the SFD API response back to the client (Vapi or Postman)
-        response.headers.forEach((value, name) => {
-            // Prevent issues by not setting forbidden or irrelevant headers
-            if (!['set-cookie', 'origin', 'host', 'connection'].includes(name.toLowerCase())) {
-                res.setHeader(name, value);
+        // Copy all headers from the target API response back to the client
+        // Axios response.headers is an object, not a forEachable map
+        for (const headerName in response.headers) {
+            // Avoid setting forbidden or irrelevant headers
+            // Render automatically adds some headers, no need to forward those from the target.
+            if (!['set-cookie', 'origin', 'host', 'connection', 'transfer-encoding', 'content-encoding'].includes(headerName.toLowerCase())) {
+                res.setHeader(headerName, response.headers[headerName]);
             }
-        });
+        }
 
         // Set the HTTP status code from the SFD API's response
-        res.status(response.status);
-
-        // Stream the SFD API's response body back to the client
-        response.body.pipe(res);
+        res.status(response.status).send(response.data); // Send the data directly
 
     } catch (error) {
-        // Log and send a 500 error if the proxy request fails
-        console.error('Proxy request failed:', error);
-        res.status(500).json({ error: 'Proxy request failed', details: error.message });
+        // Axios errors have a structured response if it's an HTTP error
+        if (error.response) {
+            console.error('Proxy request failed (axios error.response):', error.response.status, error.response.data);
+            res.status(error.response.status).json({
+                error: 'Proxy request failed (remote API error)',
+                details: error.message,
+                remoteStatus: error.response.status,
+                remoteData: error.response.data
+            });
+        } else if (error.request) {
+            // The request was made but no response was received (e.g., network error, timeout)
+            console.error('Proxy request failed (axios error.request): No response received', error.message);
+            res.status(500).json({ error: 'Proxy request failed (no response from remote API)', details: error.message });
+        } else {
+            // Something else happened in setting up the request that triggered an Error
+            console.error('Proxy request failed (axios general error):', error.message);
+            res.status(500).json({ error: 'Proxy request failed (general error)', details: error.message });
+        }
     }
 });
 
