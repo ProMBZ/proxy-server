@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // To parse JSON request bodies
 
+// Define the base URL for the SFD API
+const SFD_BASE_URL = 'https://sfd.co:6500'; // ENSURE THIS IS CORRECT AND NO TYPOS
+
 // Route to handle all incoming requests (GET, POST, etc.)
 app.all('/api/*', async (req, res) => {
     // Extract the original path after /api/
@@ -17,54 +20,64 @@ app.all('/api/*', async (req, res) => {
     const method = req.method;
     const headers = { ...req.headers };
 
-    // Remove host header to prevent issues with target server
+    // Clean up headers that might cause issues with the target server
     delete headers.host;
-    // Remove if-none-match header to ensure fresh content
     delete headers['if-none-match'];
-    // Remove accept-encoding header to prevent compression issues
-    delete headers['accept-encoding']; // Or allow if your client handles it
-
-    // IMPORTANT: Ensure the Authorization header is passed correctly
-    // If your client sends it as 'Authorization', it should be fine.
-
-    // Define the base URL for the SFD API
-    const SFD_BASE_URL = 'https://sfd.co:6500'; // Make sure this is correct
+    delete headers['accept-encoding'];
 
     // Construct the full target URL
-    const fullTargetUrl = `${SFD_BASE_URL}${targetPath}${originalUrl.includes('?') ? originalUrl.substring(originalUrl.indexOf('?')) : ''}`;
+    let fullTargetUrl = `${SFD_BASE_URL}${targetPath}`;
+    if (originalUrl.includes('?')) {
+        fullTargetUrl += originalUrl.substring(originalUrl.indexOf('?'));
+    }
 
-    // Log the incoming request and the target URL for debugging
-    console.log(`--- Proxy Request ---`);
+    // --- NEW DEBUGGING LOGS AND CHECKS ---
+    console.log(`--- Proxy Request Details ---`);
     console.log(`Method: ${method}`);
-    console.log(`Original URL: ${req.originalUrl}`);
-    console.log(`Target Path: ${targetPath}`);
-    console.log(`Full Target URL: ${fullTargetUrl}`);
+    console.log(`req.path: ${req.path}`);
+    console.log(`req.originalUrl: ${req.originalUrl}`);
+    console.log(`Calculated targetPath: ${targetPath}`);
+    console.log(`Constructed fullTargetUrl: ${fullTargetUrl}`);
     console.log(`Headers:`, headers);
     console.log(`Body:`, req.body);
-    console.log(`--- End Proxy Request ---`);
+    console.log(`--- End Proxy Request Details ---`);
+
+    // Basic validation before calling Axios
+    if (!fullTargetUrl || !fullTargetUrl.startsWith('http')) {
+        const toolCallId = req.body.toolCallId || 'default_tool_call_id';
+        const errorMessage = `Proxy URL construction error: Invalid fullTargetUrl "${fullTargetUrl}". Check source path and base URL.`;
+        console.error(errorMessage);
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500)
+            }]
+        });
+    }
+    // --- END NEW DEBUGGING LOGS AND CHECKS ---
 
     try {
         const axiosConfig = {
             method: method,
-            url: fullTargetUrl,
+            url: fullTargetUrl, // Use the carefully constructed URL
             headers: headers,
             validateStatus: function (status) {
-                return status >= 200 && status < 500; // Do not throw for 4xx errors, handle them in catch block
+                return status >= 200 && status < 500; // Do not throw for 4xx errors, handle them below
             }
         };
 
-        // For GET requests, parameters are in the URL, no need for body
+        // For GET requests, parameters are in the URL, no need for data/body
         if (method !== 'GET' && method !== 'HEAD') {
             axiosConfig.data = req.body;
         }
 
         const sfdResponse = await axios(axiosConfig);
 
-        // **THIS IS THE CRITICAL CHANGE FOR VAPI FORMATTING**
-        const toolCallId = req.body.toolCallId || 'default_tool_call_id'; // Get the toolCallId from Vapi's request body
+        // Extract toolCallId from Vapi's request body
+        const toolCallId = req.body.toolCallId || 'default_tool_call_id'; 
 
         // If SFD API returned an error (e.g., 401, or custom error object), format it as Vapi error
-        if (sfdResponse.status >= 400 || sfdResponse.data.error) {
+        if (sfdResponse.status >= 400 || (sfdResponse.data && sfdResponse.data.error)) {
             console.error('--- SFD API Error Response ---');
             console.error('Status:', sfdResponse.status);
             console.error('Data:', sfdResponse.data);
@@ -73,17 +86,15 @@ app.all('/api/*', async (req, res) => {
             if (sfdResponse.data && typeof sfdResponse.data === 'object' && sfdResponse.data.error && sfdResponse.data.error.description) {
                 errorMessage += ` Description: ${sfdResponse.data.error.description}`;
             } else if (sfdResponse.data) {
-                // If it's not the specific error format, stringify the whole response data
                 errorMessage += ` Raw response: ${JSON.stringify(sfdResponse.data)}`;
             } else if (sfdResponse.statusText) {
                 errorMessage += ` Status Text: ${sfdResponse.statusText}`;
             }
 
-            // Vapi expects error as a single-line string
             const vapiErrorResponse = {
                 results: [{
                     toolCallId: toolCallId,
-                    error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500) // Ensure single line and limit length
+                    error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500)
                 }]
             };
             return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks
@@ -94,23 +105,20 @@ app.all('/api/*', async (req, res) => {
         console.log('Status:', sfdResponse.status);
         console.log('Data:', sfdResponse.data);
 
-        // Convert the SFD API data into a single-line string.
-        // For complex objects, you might want to stringify specific fields or just the whole object.
-        // For now, let's stringify the entire data.
         const resultString = JSON.stringify(sfdResponse.data);
 
         const vapiSuccessResponse = {
             results: [{
                 toolCallId: toolCallId,
-                result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500) // Ensure single line and limit length
+                result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500)
             }]
         };
         return res.status(200).json(vapiSuccessResponse); // Always return 200 for Vapi webhooks
 
     } catch (error) {
-        console.error(`--- Proxy Error ---`);
+        console.error(`--- Proxy Internal Error Catch Block ---`);
         console.error(`Full Axios Error:`, error.message);
-        console.error(`Error config:`, error.config);
+        console.error(`Error config (if available):`, error.config); // axios config including URL
         if (error.response) {
             console.error(`Error Response Status:`, error.response.status);
             console.error(`Error Response Data:`, error.response.data);
@@ -118,7 +126,7 @@ app.all('/api/*', async (req, res) => {
         } else if (error.request) {
             console.error(`Error Request:`, error.request);
         } else {
-            console.error(`Error message:`, error.message);
+            console.error(`General Error message:`, error.message);
         }
 
         // Format proxy internal errors for Vapi
@@ -126,14 +134,18 @@ app.all('/api/*', async (req, res) => {
         const vapiErrorResponse = {
             results: [{
                 toolCallId: toolCallId,
-                error: `Proxy internal error: ${error.message}. Please check proxy logs.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
+                error: `Proxy internal error: ${error.message}. Check proxy logs for more details.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
             }]
         };
         return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks
     }
 });
 
-// Start the proxy server
+// A simple test endpoint for the proxy itself
+app.get('/', (req, res) => {
+    res.send('CORS Proxy is running.');
+});
+
 app.listen(PORT, () => {
     console.log(`Proxy server listening on port ${PORT}`);
 });
