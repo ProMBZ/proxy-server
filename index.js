@@ -1,20 +1,19 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-require('dotenv').config();
+require('dotenv').config(); // Make sure you have a .env file with PORT and SFD_AUTH_TOKEN
 
 const app = express();
-const port = process.env.PORT || 3000;
+// Use process.env.PORT, and set a default if not found (Render will set it)
+const port = process.env.PORT || 10000; // Render typically uses port 10000 for Node.js apps
 
 // Explicit CORS configuration
-// Allow all origins, methods, and headers for simplicity, especially during debugging.
-// In production, you might want to restrict 'origin' to Vapi.ai's domains.
 app.use(cors({
-    origin: '*', // Allow all origins
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Explicitly allow all methods
-    allowedHeaders: 'Content-Type,Authorization,Accept', // Explicitly allow common headers
-    credentials: true, // Allow cookies/authorization headers to be sent
-    optionsSuccessStatus: 204 // For OPTIONS preflight requests, send 204 No Content success
+    origin: '*', // Allow all origins (for Vapi.ai and local testing)
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Authorization,Accept',
+    credentials: true,
+    optionsSuccessStatus: 204
 }));
 
 // Middleware to parse JSON and URL-encoded bodies from incoming requests
@@ -27,44 +26,48 @@ app.get('/', (req, res) => {
 });
 
 // Main proxy endpoint: This will catch all requests starting with /api
-// and forward them to the SFD API.
 app.use('/api', async (req, res) => {
     const pathAfterApi = req.originalUrl.substring('/api'.length);
     const targetUrl = `https://sfd.co:6500${pathAfterApi}`;
 
+    // Retrieve the SFD_AUTH_TOKEN from environment variables
+    const SFD_AUTH_TOKEN = process.env.SFD_AUTH_TOKEN;
+
+    if (!SFD_AUTH_TOKEN) {
+        console.error("SFD_AUTH_TOKEN environment variable is not set!");
+        return res.status(500).json({ error: "Server configuration error: SFD Authorization Token not found." });
+    }
+
     console.log(`\n--- Incoming Request to Proxy ---`);
     console.log(`URL: ${req.originalUrl}`);
     console.log(`Method: ${req.method}`);
-    console.log(`Incoming Headers:`, req.headers); // Log ALL incoming headers
-    console.log(`Incoming Body:`, req.body); // Log incoming body
+    console.log(`Incoming Headers:`, req.headers);
+    console.log(`Incoming Body:`, req.body);
 
     // Prepare headers to be sent to the target SFD API
-    const headersForSFD = {};
+    const headersForSFD = {
+        // !!! IMPORTANT: Add the Authorization header directly here using the token from environment variables !!!
+        'Authorization': SFD_AUTH_TOKEN
+    };
 
-    // Forward relevant headers from the client to the SFD API
-    if (req.headers.authorization) headersForSFD['Authorization'] = req.headers.authorization;
+    // Forward other relevant headers from the client to the SFD API
+    // Ensure you are not overriding the Authorization header we just set
     if (req.headers.accept) headersForSFD['Accept'] = req.headers.accept;
     if (req.headers['content-type']) headersForSFD['Content-Type'] = req.headers['content-type'];
-
-    // You might need to add other headers if SFD API requires them, e.g., User-Agent, X-Requested-With
-    // headersForSFD['User-Agent'] = 'Custom-Vapi-Proxy/1.0'; 
-    // headersForSFD['X-Requested-With'] = 'XMLHttpRequest'; // Sometimes required by APIs
 
     console.log(`--- Outgoing Request from Proxy to SFD API ---`);
     console.log(`Target URL: ${targetUrl}`);
     console.log(`Method: ${req.method}`);
-    console.log(`Headers Sent to SFD:`, headersForSFD); // Log headers sent to SFD
+    console.log(`Headers Sent to SFD:`, headersForSFD);
 
     try {
         const axiosConfig = {
             method: req.method,
             url: targetUrl,
-            headers: headersForSFD, // Use the prepared headers
-            timeout: 15000, // 15 seconds timeout
+            headers: headersForSFD,
+            timeout: 15000,
             validateStatus: function (status) {
-                // Return true for status codes that should not trigger an error (e.g., 2xx, 3xx, even 4xx if you want to handle them as non-errors)
-                // This prevents Axios from throwing an error for 4xx responses, allowing us to pass them through.
-                return status >= 200 && status < 500; 
+                return status >= 200 && status < 500;
             }
         };
 
@@ -77,10 +80,10 @@ app.use('/api', async (req, res) => {
 
         console.log(`--- Response Received from SFD API ---`);
         console.log(`Status from SFD: ${response.status}`);
-        console.log(`Headers from SFD:`, response.headers); // Log all headers received from SFD
-        console.log(`Body from SFD (snippet):`, JSON.stringify(response.data).substring(0, 500)); // Log part of the response body
+        console.log(`Headers from SFD:`, response.headers);
+        console.log(`Body from SFD (snippet):`, JSON.stringify(response.data).substring(0, 500) + (JSON.stringify(response.data).length > 500 ? '...' : ''));
 
-        // Copy all headers from the SFD API response back to the client
+        // Copy all headers from the SFD API response back to the client (Vapi)
         for (const headerName in response.headers) {
             // Avoid setting forbidden or irrelevant headers that Render might handle or cause issues
             if (!['set-cookie', 'origin', 'host', 'connection', 'transfer-encoding', 'content-encoding'].includes(headerName.toLowerCase())) {
@@ -93,7 +96,6 @@ app.use('/api', async (req, res) => {
 
     } catch (error) {
         console.log(`\n--- Proxy Error ---`);
-        // Axios errors have a structured response if it's an HTTP error
         if (error.response) {
             console.error('Proxy request failed (remote API error):', error.response.status, error.response.data);
             res.status(error.response.status).json({
@@ -103,11 +105,9 @@ app.use('/api', async (req, res) => {
                 remoteData: error.response.data
             });
         } else if (error.request) {
-            // The request was made but no response was received (e.g., network error, timeout)
             console.error('Proxy request failed (axios error.request): No response received', error.message);
-            res.status(500).json({ error: 'Proxy request failed (no response from remote API)', details: error.message });
+            res.status(504).json({ error: 'Gateway Timeout: SFD API did not respond.' });
         } else {
-            // Something else happened in setting up the request that triggered an Error
             console.error('Proxy request failed (axios general error):', error.message);
             res.status(500).json({ error: 'Proxy request failed (general error)', details: error.message });
         }
