@@ -1,36 +1,31 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-require('dotenv').config(); // Make sure you have a .env file with PORT and SFD_AUTH_TOKEN
+require('dotenv').config();
 
 const app = express();
-// Use process.env.PORT, and set a default if not found (Render will set it)
-const port = process.env.PORT || 10000; // Render typically uses port 10000 for Node.js apps
+const port = process.env.PORT || 10000;
 
-// Explicit CORS configuration
 app.use(cors({
-    origin: '*', // Allow all origins (for Vapi.ai and local testing)
+    origin: '*',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type,Authorization,Accept',
     credentials: true,
     optionsSuccessStatus: 204
 }));
 
-// Middleware to parse JSON and URL-encoded bodies from incoming requests
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// A simple health check endpoint for your proxy
 app.get('/', (req, res) => {
     res.status(200).send('SFD CORS Proxy is running!');
 });
 
-// Main proxy endpoint: This will catch all requests starting with /api
 app.use('/api', async (req, res) => {
     const pathAfterApi = req.originalUrl.substring('/api'.length);
-    const targetUrl = `https://sfd.co:6500${pathAfterApi}`;
+    const SFD_BASE_URL = 'https://sfd.co:6500'; // Make sure this is correctly defined
+    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`;
 
-    // Retrieve the SFD_AUTH_TOKEN from environment variables
     const SFD_AUTH_TOKEN = process.env.SFD_AUTH_TOKEN;
 
     if (!SFD_AUTH_TOKEN) {
@@ -44,34 +39,38 @@ app.use('/api', async (req, res) => {
     console.log(`Incoming Headers:`, req.headers);
     console.log(`Incoming Body:`, req.body);
 
-    // Prepare headers to be sent to the target SFD API
     const headersForSFD = {
-        // !!! IMPORTANT: Add the Authorization header directly here using the token from environment variables !!!
         'Authorization': SFD_AUTH_TOKEN
     };
 
-    // Forward other relevant headers from the client to the SFD API
-    // Ensure you are not overriding the Authorization header we just set
     if (req.headers.accept) headersForSFD['Accept'] = req.headers.accept;
     if (req.headers['content-type']) headersForSFD['Content-Type'] = req.headers['content-type'];
+
+    // --- CRITICAL FIX: Filter out Vapi's internal 'url' query parameter ---
+    const paramsForSFD = { ...req.query };
+    if (paramsForSFD.url) {
+        delete paramsForSFD.url;
+    }
+    // --- END CRITICAL FIX ---
 
     console.log(`--- Outgoing Request from Proxy to SFD API ---`);
     console.log(`Target URL: ${targetUrl}`);
     console.log(`Method: ${req.method}`);
     console.log(`Headers Sent to SFD:`, headersForSFD);
+    console.log(`Query Params Sent to SFD:`, paramsForSFD); // Log the filtered params
 
     try {
         const axiosConfig = {
             method: req.method,
             url: targetUrl,
             headers: headersForSFD,
+            params: paramsForSFD, // Use the filtered parameters
             timeout: 15000,
             validateStatus: function (status) {
                 return status >= 200 && status < 500;
             }
         };
 
-        // For POST, PUT, PATCH, attach the request body
         if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
             axiosConfig.data = req.body;
         }
@@ -83,15 +82,12 @@ app.use('/api', async (req, res) => {
         console.log(`Headers from SFD:`, response.headers);
         console.log(`Body from SFD (snippet):`, JSON.stringify(response.data).substring(0, 500) + (JSON.stringify(response.data).length > 500 ? '...' : ''));
 
-        // Copy all headers from the SFD API response back to the client (Vapi)
         for (const headerName in response.headers) {
-            // Avoid setting forbidden or irrelevant headers that Render might handle or cause issues
             if (!['set-cookie', 'origin', 'host', 'connection', 'transfer-encoding', 'content-encoding'].includes(headerName.toLowerCase())) {
                 res.setHeader(headerName, response.headers[headerName]);
             }
         }
 
-        // Set the HTTP status code from the SFD API's response and send the data
         res.status(response.status).send(response.data);
 
     } catch (error) {
@@ -115,7 +111,6 @@ app.use('/api', async (req, res) => {
     }
 });
 
-// Start the Express server
 app.listen(port, () => {
     console.log(`SFD CORS Proxy listening at http://localhost:${port}`);
 });
