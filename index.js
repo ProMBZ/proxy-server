@@ -22,9 +22,13 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api', async (req, res) => {
-    const pathAfterApi = req.originalUrl.substring('/api'.length);
-    const SFD_BASE_URL = 'https://sfd.co:6500'; // Make sure this is correctly defined
-    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`;
+    // --- CRITICAL FIX START ---
+    // Use req.path to get only the path, excluding any query parameters Vapi might add
+    const pathAfterApi = req.path.substring('/api'.length);
+    // --- CRITICAL FIX END ---
+
+    const SFD_BASE_URL = 'https://sfd.co:6500';
+    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`; // This will now be https://sfd.co:6500/Users
 
     const SFD_AUTH_TOKEN = process.env.SFD_AUTH_TOKEN;
 
@@ -46,25 +50,24 @@ app.use('/api', async (req, res) => {
     if (req.headers.accept) headersForSFD['Accept'] = req.headers.accept;
     if (req.headers['content-type']) headersForSFD['Content-Type'] = req.headers['content-type'];
 
-    // --- CRITICAL FIX: Filter out Vapi's internal 'url' query parameter ---
+    // Filter out the 'url' query parameter added by Vapi's test utility (still needed for req.query if it had other params)
     const paramsForSFD = { ...req.query };
     if (paramsForSFD.url) {
         delete paramsForSFD.url;
     }
-    // --- END CRITICAL FIX ---
 
     console.log(`--- Outgoing Request from Proxy to SFD API ---`);
     console.log(`Target URL: ${targetUrl}`);
     console.log(`Method: ${req.method}`);
     console.log(`Headers Sent to SFD:`, headersForSFD);
-    console.log(`Query Params Sent to SFD:`, paramsForSFD); // Log the filtered params
+    console.log(`Query Params Sent to SFD:`, paramsForSFD);
 
     try {
         const axiosConfig = {
             method: req.method,
             url: targetUrl,
             headers: headersForSFD,
-            params: paramsForSFD, // Use the filtered parameters
+            params: paramsForSFD,
             timeout: 15000,
             validateStatus: function (status) {
                 return status >= 200 && status < 500;
