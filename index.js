@@ -1,10 +1,17 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const https = require('https'); // Import the built-in https module
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 10000;
+
+// --- IMPORTANT: Configure HTTPS Agent to bypass SSL validation (for testing only) ---
+const httpsAgent = new https.Agent({
+    rejectUnauthorized: false // WARNING: Do NOT use this in production with untrusted endpoints!
+});
+// --- END IMPORTANT ---
 
 app.use(cors({
     origin: '*',
@@ -22,13 +29,9 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api', async (req, res) => {
-    // --- CRITICAL FIX START ---
-    // Use req.path to get only the path, excluding any query parameters Vapi might add
     const pathAfterApi = req.path.substring('/api'.length);
-    // --- CRITICAL FIX END ---
-
     const SFD_BASE_URL = 'https://sfd.co:6500';
-    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`; // This will now be https://sfd.co:6500/Users
+    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`;
 
     const SFD_AUTH_TOKEN = process.env.SFD_AUTH_TOKEN;
 
@@ -50,7 +53,6 @@ app.use('/api', async (req, res) => {
     if (req.headers.accept) headersForSFD['Accept'] = req.headers.accept;
     if (req.headers['content-type']) headersForSFD['Content-Type'] = req.headers['content-type'];
 
-    // Filter out the 'url' query parameter added by Vapi's test utility (still needed for req.query if it had other params)
     const paramsForSFD = { ...req.query };
     if (paramsForSFD.url) {
         delete paramsForSFD.url;
@@ -69,6 +71,9 @@ app.use('/api', async (req, res) => {
             headers: headersForSFD,
             params: paramsForSFD,
             timeout: 15000,
+            // --- IMPORTANT: Add the HTTPS Agent here ---
+            httpsAgent: httpsAgent,
+            // --- END IMPORTANT ---
             validateStatus: function (status) {
                 return status >= 200 && status < 500;
             }
@@ -108,6 +113,8 @@ app.use('/api', async (req, res) => {
             res.status(504).json({ error: 'Gateway Timeout: SFD API did not respond.' });
         } else {
             console.error('Proxy request failed (axios general error):', error.message);
+            // This is the specific error you were getting. Log the full error object for more detail.
+            console.error('Full Axios Error:', error);
             res.status(500).json({ error: 'Proxy request failed (general error)', details: error.message });
         }
         console.log(`-------------------\n`);
