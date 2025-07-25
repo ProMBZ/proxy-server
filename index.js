@@ -9,14 +9,27 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // To parse JSON request bodies
 
-// Define the base URL for the SFD API
-const SFD_BASE_URL = 'https://sfd.co:6500'; // ENSURE THIS IS CORRECT AND NO TYPOS
+// Define the base URL for the SFD API (ensure it ends with a slash if paths don't start with one)
+const SFD_BASE_URL = 'https://sfd.co:6500/'; // <<< ADDED TRAILING SLASH HERE
 
 // Route to handle all incoming requests (GET, POST, etc.)
 app.all('/api/*', async (req, res) => {
     // Extract the original path after /api/
-    const targetPath = req.path.substring(5); // Removes '/api/'
-    const originalUrl = req.originalUrl; // Includes query parameters
+    const targetPath = req.path.substring(5); // Removes '/api/' e.g., 'appointment/books'
+
+    // Extract only the relevant query parameters for the SFD API
+    // Vapi adds its own 'url' parameter, which we need to filter out.
+    const queryParams = new URLSearchParams(req.originalUrl.split('?')[1]);
+    let sfdApiQueryParams = new URLSearchParams();
+
+    // Iterate through parameters and only keep those relevant to SFD API (e.g., date, time, app_rsn_id)
+    // You might need to refine this if Vapi uses more complex query structures
+    for (const [key, value] of queryParams.entries()) {
+        if (key !== 'url') { // Exclude Vapi's 'url' parameter
+            sfdApiQueryParams.append(key, value);
+        }
+    }
+
     const method = req.method;
     const headers = { ...req.headers };
 
@@ -27,16 +40,17 @@ app.all('/api/*', async (req, res) => {
 
     // Construct the full target URL
     let fullTargetUrl = `${SFD_BASE_URL}${targetPath}`;
-    if (originalUrl.includes('?')) {
-        fullTargetUrl += originalUrl.substring(originalUrl.indexOf('?'));
+    if (sfdApiQueryParams.toString()) {
+        fullTargetUrl += `?${sfdApiQueryParams.toString()}`;
     }
 
-    // --- NEW DEBUGGING LOGS AND CHECKS ---
+    // --- DEBUGGING LOGS AND CHECKS ---
     console.log(`--- Proxy Request Details ---`);
     console.log(`Method: ${method}`);
     console.log(`req.path: ${req.path}`);
     console.log(`req.originalUrl: ${req.originalUrl}`);
     console.log(`Calculated targetPath: ${targetPath}`);
+    console.log(`SFD API Query Params: ${sfdApiQueryParams.toString()}`);
     console.log(`Constructed fullTargetUrl: ${fullTargetUrl}`);
     console.log(`Headers:`, headers);
     console.log(`Body:`, req.body);
@@ -54,7 +68,7 @@ app.all('/api/*', async (req, res) => {
             }]
         });
     }
-    // --- END NEW DEBUGGING LOGS AND CHECKS ---
+    // --- END DEBUGGING LOGS AND CHECKS ---
 
     try {
         const axiosConfig = {
@@ -118,7 +132,7 @@ app.all('/api/*', async (req, res) => {
     } catch (error) {
         console.error(`--- Proxy Internal Error Catch Block ---`);
         console.error(`Full Axios Error:`, error.message);
-        console.error(`Error config (if available):`, error.config); // axios config including URL
+        console.error(`Error config (if available):`, error.config);
         if (error.response) {
             console.error(`Error Response Status:`, error.response.status);
             console.error(`Error Response Data:`, error.response.data);
