@@ -1,170 +1,139 @@
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
-const https = require('https'); // Required for https.Agent
-require('dotenv').config(); // Load environment variables from .env file
+const cors = require('cors');
 
 const app = express();
-const port = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
-// --- IMPORTANT SECURITY NOTE ---
-// The httpsAgent with rejectUnauthorized: false is used to bypass SSL certificate
-// validation errors that might occur when connecting to the SFD API on a non-standard port
-// or with a potentially untrusted certificate.
-// While helpful for testing/debugging, using this in a production environment with
-// untrusted endpoints is a SECURITY RISK as it makes your proxy vulnerable to man-in-the-middle attacks.
-// Consider removing it or using a more secure method for production if possible.
-const httpsAgent = new https.Agent({
-    rejectUnauthorized: false
-});
-// --- END IMPORTANT SECURITY NOTE ---
+// Use CORS middleware
+app.use(cors());
+app.use(express.json()); // To parse JSON request bodies
 
-// Configure CORS for all origins, methods, and specific headers
-app.use(cors({
-    origin: '*', // Allows all origins. For production, restrict this to your Vapi dashboard domain.
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type,Authorization,Accept',
-    credentials: true, // Allow cookies to be sent (if your SFD API uses them)
-    optionsSuccessStatus: 204 // For pre-flight requests
-}));
+// Route to handle all incoming requests (GET, POST, etc.)
+app.all('/api/*', async (req, res) => {
+    // Extract the original path after /api/
+    const targetPath = req.path.substring(5); // Removes '/api/'
+    const originalUrl = req.originalUrl; // Includes query parameters
+    const method = req.method;
+    const headers = { ...req.headers };
 
-// Enable parsing of JSON request bodies
-app.use(express.json());
-// Enable parsing of URL-encoded request bodies
-app.use(express.urlencoded({ extended: true }));
+    // Remove host header to prevent issues with target server
+    delete headers.host;
+    // Remove if-none-match header to ensure fresh content
+    delete headers['if-none-match'];
+    // Remove accept-encoding header to prevent compression issues
+    delete headers['accept-encoding']; // Or allow if your client handles it
 
-// Basic root endpoint to confirm proxy is running
-app.get('/', (req, res) => {
-    res.status(200).send('SFD CORS Proxy is running!');
-});
+    // IMPORTANT: Ensure the Authorization header is passed correctly
+    // If your client sends it as 'Authorization', it should be fine.
 
-// Universal proxy endpoint for all /api/* requests
-app.use('/api', async (req, res) => {
-    // Define the base URL of your target SFD API
-    // Ensure it ends with a slash for robust concatenation
-    const SFD_BASE_URL = 'https://sfd.co:6500/';
+    // Define the base URL for the SFD API
+    const SFD_BASE_URL = 'https://sfd.co:6500'; // Make sure this is correct
 
-    // Extract the path after '/api', remove any leading/trailing slashes for clean concatenation
-    let pathAfterApi = req.path.substring('/api'.length);
-    if (pathAfterApi.startsWith('/')) {
-        pathAfterApi = pathAfterApi.substring(1); // Remove leading slash
-    }
-    if (pathAfterApi.endsWith('/')) {
-        pathAfterApi = pathAfterApi.slice(0, -1); // Remove trailing slash
-    }
+    // Construct the full target URL
+    const fullTargetUrl = `${SFD_BASE_URL}${targetPath}${originalUrl.includes('?') ? originalUrl.substring(originalUrl.indexOf('?')) : ''}`;
 
-    // Construct the final target URL for the SFD API
-    const targetUrl = `${SFD_BASE_URL}${pathAfterApi}`;
-
-    // Log the constructed URL for debugging and verification
-    console.log(`Debug: Constructed targetUrl: ${targetUrl}`);
-
-    // Get the SFD Authorization Token from environment variables
-    const SFD_AUTH_TOKEN = process.env.SFD_AUTH_TOKEN;
-
-    // Check if the auth token is set
-    if (!SFD_AUTH_TOKEN) {
-        console.error("SFD_AUTH_TOKEN environment variable is not set!");
-        return res.status(500).json({ error: "Server configuration error: SFD Authorization Token not found." });
-    }
-
-    // --- Incoming Request Logging ---
-    console.log(`\n--- Incoming Request to Proxy ---`);
-    console.log(`URL: ${req.originalUrl}`);
-    console.log(`Method: ${req.method}`);
-    console.log(`Incoming Headers:`, req.headers);
-    console.log(`Incoming Body:`, req.body);
-
-    // Prepare headers to send to the SFD API
-    const headersForSFD = {
-        'Authorization': SFD_AUTH_TOKEN // Use the bearer token from your environment
-    };
-
-    // Forward Accept and Content-Type headers if they exist in the incoming request
-    if (req.headers.accept) headersForSFD['Accept'] = req.headers.accept;
-    if (req.headers['content-type']) headersForSFD['Content-Type'] = req.headers['content-type'];
-
-    // Filter out the 'url' query parameter that Vapi's test utility might add
-    const paramsForSFD = { ...req.query };
-    if (paramsForSFD.url) {
-        delete paramsForSFD.url;
-    }
-
-    // --- Outgoing Request Logging ---
-    console.log(`--- Outgoing Request from Proxy to SFD API ---`);
-    console.log(`Target URL: ${targetUrl}`);
-    console.log(`Method: ${req.method}`);
-    console.log(`Headers Sent to SFD:`, headersForSFD);
-    console.log(`Query Params Sent to SFD:`, paramsForSFD);
+    // Log the incoming request and the target URL for debugging
+    console.log(`--- Proxy Request ---`);
+    console.log(`Method: ${method}`);
+    console.log(`Original URL: ${req.originalUrl}`);
+    console.log(`Target Path: ${targetPath}`);
+    console.log(`Full Target URL: ${fullTargetUrl}`);
+    console.log(`Headers:`, headers);
+    console.log(`Body:`, req.body);
+    console.log(`--- End Proxy Request ---`);
 
     try {
-        // Configure the Axios request to the SFD API
         const axiosConfig = {
-            method: req.method, // Use the incoming request's method (GET, POST, etc.)
-            url: targetUrl,     // The correctly constructed target URL
-            headers: headersForSFD, // Headers including Authorization
-            params: paramsForSFD,   // Query parameters (excluding Vapi's 'url')
-            timeout: 15000,     // Timeout after 15 seconds
-            httpsAgent: httpsAgent, // Use the custom HTTPS agent for SSL bypass
-            // Validate any status code between 200 and 499 as a success (to capture API errors)
+            method: method,
+            url: fullTargetUrl,
+            headers: headers,
             validateStatus: function (status) {
-                return status >= 200 && status < 500;
+                return status >= 200 && status < 500; // Do not throw for 4xx errors, handle them in catch block
             }
         };
 
-        // If it's a POST, PUT, or PATCH request, include the request body
-        if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+        // For GET requests, parameters are in the URL, no need for body
+        if (method !== 'GET' && method !== 'HEAD') {
             axiosConfig.data = req.body;
         }
 
-        // Make the request to the SFD API
-        const response = await axios(axiosConfig);
+        const sfdResponse = await axios(axiosConfig);
 
-        // --- Response from SFD API Logging ---
-        console.log(`--- Response Received from SFD API ---`);
-        console.log(`Status from SFD: ${response.status}`);
-        console.log(`Headers from SFD:`, response.headers);
-        // Log a snippet of the response body to avoid excessively large logs
-        console.log(`Body from SFD (snippet):`, JSON.stringify(response.data).substring(0, 500) + (JSON.stringify(response.data).length > 500 ? '...' : ''));
+        // **THIS IS THE CRITICAL CHANGE FOR VAPI FORMATTING**
+        const toolCallId = req.body.toolCallId || 'default_tool_call_id'; // Get the toolCallId from Vapi's request body
 
-        // Forward relevant headers from the SFD API response back to the client
-        for (const headerName in response.headers) {
-            // Exclude headers that should not be forwarded or cause issues
-            if (!['set-cookie', 'origin', 'host', 'connection', 'transfer-encoding', 'content-encoding'].includes(headerName.toLowerCase())) {
-                res.setHeader(headerName, response.headers[headerName]);
+        // If SFD API returned an error (e.g., 401, or custom error object), format it as Vapi error
+        if (sfdResponse.status >= 400 || sfdResponse.data.error) {
+            console.error('--- SFD API Error Response ---');
+            console.error('Status:', sfdResponse.status);
+            console.error('Data:', sfdResponse.data);
+
+            let errorMessage = `SFD API Error: Status ${sfdResponse.status}.`;
+            if (sfdResponse.data && typeof sfdResponse.data === 'object' && sfdResponse.data.error && sfdResponse.data.error.description) {
+                errorMessage += ` Description: ${sfdResponse.data.error.description}`;
+            } else if (sfdResponse.data) {
+                // If it's not the specific error format, stringify the whole response data
+                errorMessage += ` Raw response: ${JSON.stringify(sfdResponse.data)}`;
+            } else if (sfdResponse.statusText) {
+                errorMessage += ` Status Text: ${sfdResponse.statusText}`;
             }
+
+            // Vapi expects error as a single-line string
+            const vapiErrorResponse = {
+                results: [{
+                    toolCallId: toolCallId,
+                    error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500) // Ensure single line and limit length
+                }]
+            };
+            return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks
         }
 
-        // Send the SFD API's status and data back to the client
-        res.status(response.status).send(response.data);
+        // If SFD API returned success, format it as Vapi result
+        console.log('--- SFD API Success Response ---');
+        console.log('Status:', sfdResponse.status);
+        console.log('Data:', sfdResponse.data);
+
+        // Convert the SFD API data into a single-line string.
+        // For complex objects, you might want to stringify specific fields or just the whole object.
+        // For now, let's stringify the entire data.
+        const resultString = JSON.stringify(sfdResponse.data);
+
+        const vapiSuccessResponse = {
+            results: [{
+                toolCallId: toolCallId,
+                result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500) // Ensure single line and limit length
+            }]
+        };
+        return res.status(200).json(vapiSuccessResponse); // Always return 200 for Vapi webhooks
 
     } catch (error) {
-        // --- Proxy Error Handling and Logging ---
-        console.log(`\n--- Proxy Error ---`);
+        console.error(`--- Proxy Error ---`);
+        console.error(`Full Axios Error:`, error.message);
+        console.error(`Error config:`, error.config);
         if (error.response) {
-            // Error received from the remote SFD API
-            console.error('Proxy request failed (remote API error):', error.response.status, error.response.data);
-            res.status(error.response.status).json({
-                error: 'Proxy request failed (remote API error)',
-                details: error.message,
-                remoteStatus: error.response.status,
-                remoteData: error.response.data
-            });
+            console.error(`Error Response Status:`, error.response.status);
+            console.error(`Error Response Data:`, error.response.data);
+            console.error(`Error Response Headers:`, error.response.headers);
         } else if (error.request) {
-            // Request was made but no response was received (e.g., timeout, network issue)
-            console.error('Proxy request failed (axios error.request): No response received', error.message);
-            res.status(504).json({ error: 'Gateway Timeout: SFD API did not respond.' });
+            console.error(`Error Request:`, error.request);
         } else {
-            // Something happened in setting up the request that triggered an Error (e.g., Invalid URL)
-            console.error('Proxy request failed (axios general error):', error.message);
-            console.error('Full Axios Error:', error); // Log the complete Axios error object for deeper debugging
-            res.status(500).json({ error: 'Proxy request failed (general error)', details: error.message });
+            console.error(`Error message:`, error.message);
         }
-        console.log(`-------------------\n`);
+
+        // Format proxy internal errors for Vapi
+        const toolCallId = req.body.toolCallId || 'default_tool_call_id';
+        const vapiErrorResponse = {
+            results: [{
+                toolCallId: toolCallId,
+                error: `Proxy internal error: ${error.message}. Please check proxy logs.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
+            }]
+        };
+        return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks
     }
 });
 
 // Start the proxy server
-app.listen(port, () => {
-    console.log(`SFD CORS Proxy listening at http://localhost:${port}`);
+app.listen(PORT, () => {
+    console.log(`Proxy server listening on port ${PORT}`);
 });
