@@ -1,7 +1,7 @@
 {
-  "name": "sdf-cors-proxy",
+  "name": "sfd-cors-proxy",
   "version": "1.0.0",
-  "description": "A CORS proxy for the SFD API.",
+  "description": "A CORS proxy for the SFD API with automated token refresh and file-based storage.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -11,7 +11,9 @@
     "cors",
     "proxy",
     "node.js",
-    "express"
+    "express",
+    "sfd",
+    "token-refresh"
   ],
   "author": "",
   "license": "ISC",
@@ -22,5 +24,8 @@
     "dotenv": "^17.2.0",
     "express": "^4.19.2",
     "qs": "^6.11.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
