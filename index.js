@@ -1,4 +1,4 @@
-// index.js - Render.com Proxy Server with File-Based Token Storage
+// index.js - Render.com Proxy Server with File-Based Token Storage (No Password Grant)
 
 const express = require('express');
 const axios = require('axios'); // Used for making HTTP requests
@@ -18,9 +18,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where tokens.json might be lost. Ensure it's a valid, long-lived refresh token.
-const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'ca80a0226cf7434683ccfb8cc28cbbdfc1f97d99c17047cdbc4fbcf32351f9f2'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
-const INITIAL_USERNAME = process.env.INITIAL_USERNAME || 'C5WH';
-const INITIAL_PASSWORD = process.env.INITIAL_PASSWORD || 'jaVathee123!';
+const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'YOUR_FRESH_REFRESH_TOKEN_HERE'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
 
 // --- In-Memory Cache for Tokens (updated from file, written to file) ---
 // This cache helps avoid constant file I/O for every request.
@@ -29,11 +27,6 @@ let tokenCache = {
     refreshToken: null,
     expiresAt: null, // Unix timestamp in milliseconds
 };
-
-// --- Middleware ---
-app.use(cors()); // Enable CORS for all routes
-app.use(express.json()); // To parse JSON request bodies
-app.use(express.urlencoded({ extended: false })); // To parse URL-encoded bodies
 
 // --- File Storage Helper Functions ---
 
@@ -73,12 +66,12 @@ async function writeTokenFile(tokens) {
 // --- Token Acquisition/Refresh Logic ---
 
 /**
- * Attempts to acquire or refresh an access token.
+ * Attempts to acquire or refresh an access token using the refresh_token grant.
  * Prioritizes:
  * 1. Valid token in memory cache.
  * 2. Refresh token from memory cache.
  * 3. Refresh token from file.
- * 4. Initial password grant using hardcoded credentials.
+ * 4. Fallback to INITIAL_REFRESH_TOKEN from environment variable.
  * Updates the in-memory cache and persists to file on success.
  * @param {boolean} forceRefresh If true, forces a refresh token grant even if current token is valid.
  * @returns {Promise<string|null>} The valid access token or null if acquisition fails.
@@ -92,7 +85,7 @@ async function getValidatedAccessToken(forceRefresh = false) {
         return tokenCache.accessToken;
     }
 
-    // 2. Attempt to refresh token using refresh_token grant
+    // 2. Determine which refresh token to use
     let refreshTokenToUse = tokenCache.refreshToken;
 
     // If no refresh token in cache, try reading from file
@@ -105,81 +98,26 @@ async function getValidatedAccessToken(forceRefresh = false) {
         }
     }
 
-    if (refreshTokenToUse) {
-        console.log('[AUTH] Attempting OAuth2 refresh_token grant...');
-        try {
-            const requestData = {
-                grant_type: 'refresh_token',
-                client_id: SFD_CLIENT_ID,
-                client_secret: SFD_CLIENT_SECRET,
-                refresh_token: refreshTokenToUse,
-                scope: 'API'
-            };
-
-            const tokenResponse = await axios.post(
-                `${SFD_BASE_URL}/oauth2/token`,
-                qs.stringify(requestData),
-                {
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Accept': 'application/json'
-                    },
-                    timeout: 15000 // 15 seconds timeout
-                }
-            );
-
-            const tokenData = tokenResponse.data;
-
-            if (tokenResponse.status === 200 && tokenData.access_token) {
-                 // Check if OAuth2 returned an error object despite 200 OK
-                if (tokenData.error) {
-                    console.error('[AUTH] OAuth2 refresh failed (API error in 200 response):', tokenData.error_description || tokenData.error);
-                    throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 refresh failed with API error.');
-                }
-
-                console.log('[AUTH] OAuth2 token refresh successful. Validating new token...');
-                
-                // Test the new token against /Practice endpoint
-                const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
-                    headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
-                    timeout: 10000 // 10 seconds timeout for validation
-                });
-
-                if (testResponse.status === 200) {
-                    console.log('[AUTH] New access token successfully validated.');
-                    tokenCache.accessToken = tokenData.access_token;
-                    tokenCache.expiresAt = Date.now() + (tokenData.expires_in * 1000) - (5 * 60 * 1000); // 5 min buffer
-                    if (tokenData.refresh_token) {
-                        tokenCache.refreshToken = tokenData.refresh_token; // Update refresh token if provided
-                    }
-                    await writeTokenFile(tokenCache); // Persist to file
-                    return tokenCache.accessToken;
-                } else {
-                    console.error(`[AUTH] New access token validation failed: ${testResponse.status} ${testResponse.statusText}`);
-                    throw new Error('New access token lacks account association or is invalid after refresh.');
-                }
-            } else {
-                console.error(`[AUTH] OAuth2 refresh failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
-                console.error('[AUTH] Token response data:', tokenData);
-                throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 refresh failed.');
-            }
-        } catch (error) {
-            console.error('[AUTH] Error during refresh_token grant:', error.message);
-            // If refresh token fails, clear it to force password grant next
-            tokenCache.refreshToken = null;
-            await writeTokenFile(tokenCache); // Persist cleared refresh token
-        }
+    // Fallback to initial refresh token from environment variable if still no refresh token
+    if (!refreshTokenToUse && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== 'YOUR_FRESH_REFRESH_TOKEN_HERE') {
+        refreshTokenToUse = INITIAL_REFRESH_TOKEN;
+        tokenCache.refreshToken = refreshTokenToUse; // Update cache
+        console.log('[AUTH] Using INITIAL_REFRESH_TOKEN from environment variable.');
     }
 
-    // 3. Fallback to initial password grant if refresh token failed or not available
-    console.log('[AUTH] Attempting initial password grant...');
+    if (!refreshTokenToUse) {
+        console.error('[AUTH] No refresh token available. Cannot acquire access token. Manual intervention required.');
+        return null; // Cannot proceed without a refresh token
+    }
+
+    // 3. Attempt OAuth2 refresh_token grant
+    console.log('[AUTH] Attempting OAuth2 refresh_token grant...');
     try {
         const requestData = {
-            grant_type: 'password',
+            grant_type: 'refresh_token',
             client_id: SFD_CLIENT_ID,
             client_secret: SFD_CLIENT_SECRET,
-            username: INITIAL_USERNAME,
-            password: INITIAL_PASSWORD,
+            refresh_token: refreshTokenToUse,
             scope: 'API'
         };
 
@@ -198,13 +136,13 @@ async function getValidatedAccessToken(forceRefresh = false) {
         const tokenData = tokenResponse.data;
 
         if (tokenResponse.status === 200 && tokenData.access_token) {
-            // Check if OAuth2 returned an error object despite 200 OK
+             // Check if OAuth2 returned an error object despite 200 OK
             if (tokenData.error) {
-                console.error('[AUTH] OAuth2 password grant failed (API error in 200 response):', tokenData.error_description || tokenData.error);
-                throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 password grant failed with API error.');
+                console.error('[AUTH] OAuth2 refresh failed (API error in 200 response):', tokenData.error_description || tokenData.error);
+                throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 refresh failed with API error.');
             }
 
-            console.log('[AUTH] OAuth2 password grant successful. Validating new token...');
+            console.log('[AUTH] OAuth2 token refresh successful. Validating new token...');
             
             // Test the new token against /Practice endpoint
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
@@ -213,29 +151,30 @@ async function getValidatedAccessToken(forceRefresh = false) {
             });
 
             if (testResponse.status === 200) {
-                console.log('[AUTH] New access token successfully validated from password grant.');
+                console.log('[AUTH] New access token successfully validated.');
                 tokenCache.accessToken = tokenData.access_token;
                 tokenCache.expiresAt = Date.now() + (tokenData.expires_in * 1000) - (5 * 60 * 1000); // 5 min buffer
                 if (tokenData.refresh_token) {
-                    tokenCache.refreshToken = tokenData.refresh_token; // Store refresh token
+                    tokenCache.refreshToken = tokenData.refresh_token; // Update refresh token if provided
                 }
                 await writeTokenFile(tokenCache); // Persist to file
                 return tokenCache.accessToken;
             } else {
-                console.error(`[AUTH] New access token validation failed after password grant: ${testResponse.status} ${testResponse.statusText}`);
-                throw new Error('New access token lacks account association or is invalid after password grant.');
+                console.error(`[AUTH] New access token validation failed: ${testResponse.status} ${testResponse.statusText}`);
+                throw new Error('New access token lacks account association or is invalid after refresh.');
             }
         } else {
-            console.error(`[AUTH] OAuth2 password grant failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
+            console.error(`[AUTH] OAuth2 refresh failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
             console.error('[AUTH] Token response data:', tokenData);
-            throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 password grant failed.');
+            throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 refresh failed.');
         }
     } catch (error) {
-        console.error('[AUTH] Critical password grant error:', error.message);
-        tokenCache.accessToken = null; // Clear tokens on critical error
-        tokenCache.refreshToken = null;
+        console.error('[AUTH] Error during refresh_token grant:', error.message);
+        // If refresh token fails, clear it to force new attempt and report
+        tokenCache.accessToken = null;
+        tokenCache.refreshToken = null; // Clear refresh token if it failed
         tokenCache.expiresAt = null;
-        await writeTokenFile(tokenCache); // Persist cleared state
+        await writeTokenFile(tokenCache); // Persist cleared refresh token
         return null;
     }
 }
@@ -301,7 +240,7 @@ app.use('/api/*', async (req, res, next) => {
             return res.status(200).json({
                 results: [{
                     toolCallId: toolCallId,
-                    error: 'Proxy Error: Failed to obtain valid authentication token for SFD API. Check proxy logs.'
+                    error: 'Proxy Error: Failed to obtain valid authentication token for SFD API. Check proxy logs. Manual refresh token update may be needed.'
                 }]
             });
         }
