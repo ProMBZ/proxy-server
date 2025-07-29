@@ -1,4 +1,4 @@
-// index.js - Render.com Proxy Server with File-Based Token Storage (No Password Grant)
+// index.js - Render.com Proxy Server with File-Based Token Storage (No Scope in Refresh)
 
 const express = require('express');
 const axios = require('axios'); // Used for making HTTP requests
@@ -18,7 +18,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where tokens.json might be lost. Ensure it's a valid, long-lived refresh token.
-const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '119d088b118c4873a13c996748a3c611d269591f307c4147a4f988002faf4436'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
+const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '19d088b118c4873a13c996748a3c611d269591f307c4147a4f988002faf4436'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
 
 // --- In-Memory Cache for Tokens (updated from file, written to file) ---
 // This cache helps avoid constant file I/O for every request.
@@ -118,7 +118,7 @@ async function getValidatedAccessToken(forceRefresh = false) {
             client_id: SFD_CLIENT_ID,
             client_secret: SFD_CLIENT_SECRET,
             refresh_token: refreshTokenToUse,
-            scope: 'API'
+            // REMOVED: scope: 'API' - The API seems to reject this during refresh if it doesn't match previous or expects no scope.
         };
 
         const tokenResponse = await axios.post(
@@ -396,18 +396,18 @@ app.get('/', (req, res) => {
 app.listen(PORT, async () => {
     console.log(`Proxy server listening on port ${PORT}`);
     console.log('[INIT] Attempting initial token acquisition...');
-    // Attempt to load from file first, then fall back to password grant if needed
+    // Attempt to load from file first
     const fileTokens = await readTokenFile();
     if (fileTokens) {
         tokenCache = fileTokens;
         console.log('[INIT] Tokens loaded from file into cache.');
     } else {
-        console.log('[INIT] No tokens in file or file not found. Attempting initial password grant.');
+        console.log('[INIT] No tokens in file or file not found. Will rely on INITIAL_REFRESH_TOKEN env var.');
     }
 
-    // Try to get a valid token (either from cache/file or via fresh password grant/refresh)
+    // Try to get a valid token (either from cache/file or via INITIAL_REFRESH_TOKEN env var)
     const initialAccessToken = await getValidatedAccessToken();
     if (!initialAccessToken) {
-        console.error('[INIT] Initial token acquisition failed. Proxy might not function correctly until a valid token is obtained.');
+        console.error('[INIT] Initial token acquisition failed. Proxy might not function correctly until a valid token is obtained. Please ensure INITIAL_REFRESH_TOKEN env var is valid.');
     }
 });
