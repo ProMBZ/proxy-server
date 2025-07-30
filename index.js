@@ -23,7 +23,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
-const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '119d088b118c4873a13c996748a3c611d269591f307c4147a4f988002faf4436'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
+const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'YOUR_FRESH_REFRESH_TOKEN_HERE'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
 
 // --- In-Memory Cache for Tokens ---
 // This cache helps avoid constant token acquisition. It will be reset on service restarts.
@@ -245,6 +245,10 @@ app.all('/api/*', async (req, res) => {
     // Extract the target path from the incoming request URL (e.g., '/appointment/books' from '/api/appointment/books')
     const targetPath = req.path.substring(5); // Removes '/api/'
 
+    // Construct the full target URL for the SFD API
+    // Ensure there's a '/' between the base URL and the target path
+    let fullTargetUrl = `${SFD_BASE_URL}/${targetPath}`;
+
     // Extract relevant query parameters from the original URL.
     // Vapi sometimes adds its own 'url' parameter which should be filtered out.
     const queryParams = new URLSearchParams(req.originalUrl.split('?')[1]);
@@ -253,6 +257,10 @@ app.all('/api/*', async (req, res) => {
         if (key !== 'url') { // Exclude Vapi's 'url' parameter
             sfdApiQueryParams.append(key, value);
         }
+    }
+
+    if (sfdApiQueryParams.toString()) {
+        fullTargetUrl += `?${sfdApiQueryParams.toString()}`;
     }
 
     const method = req.method;
@@ -265,12 +273,6 @@ app.all('/api/*', async (req, res) => {
     if (method === 'GET' || method === 'HEAD') {
         delete headers['content-length'];
         delete headers['content-type'];
-    }
-
-    // Construct the full target URL for the SFD API
-    let fullTargetUrl = `${SFD_BASE_URL}${targetPath}`;
-    if (sfdApiQueryParams.toString()) {
-        fullTargetUrl += `?${sfdApiQueryParams.toString()}`;
     }
 
     // --- Debugging Logs for Proxy Request ---
