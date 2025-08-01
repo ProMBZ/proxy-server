@@ -174,25 +174,28 @@ async function acquireOrRefreshToken(forceRefresh = false) {
 
 // --- 7. Helper function to handle SFD responses and format for Vapi ---
 /**
- * Takes an SFD API response and formats it into a Vapi-compatible JSON object.
- * @param {object} sfdResponse - The response object from an axios call to the SFD API.
+ * Takes an SFD API response (from an Axios call) and formats it into a Vapi-compatible JSON object.
+ * This function now accepts the full Axios response object to handle both success and error statuses.
+ * @param {object} sfdAxiosResponse - The Axios response object from a call to the SFD API.
  * @param {object} res - The Express response object.
  * @param {string} toolCallId - The ID of the tool call from Vapi.
  */
-function handleSfdResponse(sfdResponse, res, toolCallId) {
-    // If the SFD API returned an error status or an error in the body.
-    if (sfdResponse.status >= 400 || (sfdResponse.data && sfdResponse.data.error)) {
-        console.error('--- [SFD API] Error Response ---');
-        console.error('Status:', sfdResponse.status);
-        console.error('Data:', sfdResponse.data);
+function handleSfdResponse(sfdAxiosResponse, res, toolCallId) {
+    const { status, data, statusText } = sfdAxiosResponse;
 
-        let errorMessage = `SFD API Error: Status ${sfdResponse.status}.`;
-        if (sfdResponse.data && typeof sfdResponse.data === 'object' && sfdResponse.data.error && sfdResponse.data.error.description) {
-            errorMessage += ` Description: ${sfdResponse.data.error.description}`;
-        } else if (sfdResponse.data) {
-            errorMessage += ` Raw response: ${JSON.stringify(sfdResponse.data)}`;
-        } else if (sfdResponse.statusText) {
-            errorMessage += ` Status Text: ${sfdResponse.statusText}`;
+    // If the SFD API returned an error status or an error in the body.
+    if (status >= 400 || (data && data.error)) {
+        console.error('--- [SFD API] Error Response ---');
+        console.error('Status:', status);
+        console.error('Data:', data);
+
+        let errorMessage = `SFD API Error: Status ${status}.`;
+        if (data && typeof data === 'object' && data.error && data.error.description) {
+            errorMessage += ` Description: ${data.error.description}`;
+        } else if (data) {
+            errorMessage += ` Raw response: ${JSON.stringify(data)}`;
+        } else if (statusText) {
+            errorMessage += ` Status Text: ${statusText}`;
         }
 
         // Format the error into a Vapi-compatible response.
@@ -208,11 +211,11 @@ function handleSfdResponse(sfdResponse, res, toolCallId) {
 
     // On a successful response.
     console.log('--- [SFD API] Success Response ---');
-    console.log('Status:', sfdResponse.status);
-    console.log('Data:', sfdResponse.data);
+    console.log('Status:', status);
+    console.log('Data:', data);
 
     // Vapi's result field is a string, so we need to stringify the response data.
-    const resultString = JSON.stringify(sfdResponse.data);
+    const resultString = JSON.stringify(data);
 
     // Format the successful result into a Vapi-compatible response.
     const vapiSuccessResponse = {
@@ -231,6 +234,7 @@ function handleSfdResponse(sfdResponse, res, toolCallId) {
 /**
  * Calls the SFD API to get a list of available dentists.
  * @param {object} args - The arguments for the tool call (not used for this specific endpoint).
+ * @returns {Promise<object>} The full Axios response object.
  */
 async function getAvailableDentists(args) {
     const url = `${SFD_BASE_URL}/Users`;
@@ -240,12 +244,13 @@ async function getAvailableDentists(args) {
         validateStatus: (status) => status >= 200 && status < 500,
         timeout: 15000
     });
-    return response.data;
+    return response;
 }
 
 /**
  * Calls the SFD API to get available appointment books (slots).
  * @param {object} args - The arguments from the Vapi tool call.
+ * @returns {Promise<object>} The full Axios response object.
  */
 async function getAvailableBooks(args) {
     const { date, time, app_rsn_id } = args;
@@ -256,18 +261,19 @@ async function getAvailableBooks(args) {
         validateStatus: (status) => status >= 200 && status < 500,
         timeout: 15000
     });
-    return response.data;
+    return response;
 }
 
 /**
  * Registers a new patient with the SFD API.
  * This function has been updated to use the dynamic details provided by the user.
  * @param {object} args - The arguments from the Vapi tool call.
+ * @returns {Promise<object>} The full Axios response object.
  */
 async function registerNewUser(args) {
     // Correctly destructure all the fields provided by the AI from the user's conversation.
     const { forename, surname, dob, mobile, email, title, gender, street, city, county, postcode } = args;
-    
+
     // Construct the request body using the dynamic data.
     const requestBody = {
         surname: surname,
@@ -288,10 +294,10 @@ async function registerNewUser(args) {
         },
         email: email
     };
-    
+
     const url = `${SFD_BASE_URL}/patient/register`;
     console.log(`[TOOL] Calling registerNewUser: ${url} with body:`, JSON.stringify(requestBody));
-    
+
     const response = await axios.post(url, requestBody, {
         headers: {
             'Authorization': `Bearer ${tokenStore.accessToken}`,
@@ -300,12 +306,13 @@ async function registerNewUser(args) {
         validateStatus: (status) => status >= 200 && status < 500,
         timeout: 20000
     });
-    return response.data;
+    return response;
 }
 
 /**
  * Books an appointment with the SFD API.
  * @param {object} args - The arguments from the Vapi tool call.
+ * @returns {Promise<object>} The full Axios response object.
  */
 async function bookAppointment(args) {
     const { patient_id, date, time, app_rsn_id, app_rec_id } = args;
@@ -321,12 +328,13 @@ async function bookAppointment(args) {
         validateStatus: (status) => status >= 200 && status < 500,
         timeout: 20000
     });
-    return response.data;
+    return response;
 }
 
 /**
  * Cancels an appointment with the SFD API.
  * @param {object} args - The arguments from the Vapi tool call.
+ * @returns {Promise<object>} The full Axios response object.
  */
 async function cancelAppointment(args) {
     const { app_rec_id, patient_id, app_can_id = 1 } = args;
@@ -337,7 +345,7 @@ async function cancelAppointment(args) {
         validateStatus: (status) => status >= 200 && status < 500,
         timeout: 20000
     });
-    return response.data;
+    return response;
 }
 
 // --- 9. Main Proxy Route Handler ---
@@ -370,6 +378,9 @@ app.post('/api/tool', async (req, res) => {
             return res.status(400).json({ error: 'Invalid Vapi tool call webhook format.' });
         }
 
+        // Log the tool call for better debugging.
+        console.log(`[PROXY_DISPATCH] Received tool call: ${toolName} with arguments:`, toolArguments);
+
         // Ensure we have a valid access token before making any API calls.
         const tokenAcquired = await acquireOrRefreshToken();
         if (!tokenAcquired) {
@@ -382,31 +393,25 @@ app.post('/api/tool', async (req, res) => {
             });
         }
 
-        let sfdResponseData;
-        let sfdResponseStatus;
+        let sfdAxiosResponse;
 
         try {
             // Use a switch statement to dispatch the call to the appropriate tool function.
             switch (toolName) {
                 case 'getAvailableDentists':
-                    sfdResponseData = await getAvailableDentists(toolArguments);
-                    sfdResponseStatus = 200;
+                    sfdAxiosResponse = await getAvailableDentists(toolArguments);
                     break;
                 case 'getAvailableBooks':
-                    sfdResponseData = await getAvailableBooks(toolArguments);
-                    sfdResponseStatus = 200;
+                    sfdAxiosResponse = await getAvailableBooks(toolArguments);
                     break;
                 case 'registerNewUser':
-                    sfdResponseData = await registerNewUser(toolArguments);
-                    sfdResponseStatus = 200;
+                    sfdAxiosResponse = await registerNewUser(toolArguments);
                     break;
                 case 'bookAppointment':
-                    sfdResponseData = await bookAppointment(toolArguments);
-                    sfdResponseStatus = 200;
+                    sfdAxiosResponse = await bookAppointment(toolArguments);
                     break;
                 case 'cancelAppointment':
-                    sfdResponseData = await cancelAppointment(toolArguments);
-                    sfdResponseStatus = 200;
+                    sfdAxiosResponse = await cancelAppointment(toolArguments);
                     break;
                 default:
                     console.warn(`[PROXY_DISPATCH] Unknown tool name received: ${toolName}`);
@@ -418,14 +423,14 @@ app.post('/api/tool', async (req, res) => {
                     });
             }
             // Format and send the response back to Vapi.
-            return handleSfdResponse({ status: sfdResponseStatus, data: sfdResponseData }, res, toolCallId);
+            return handleSfdResponse(sfdAxiosResponse, res, toolCallId);
         } catch (error) {
             // Catch any errors that occur during the tool execution.
             console.error(`--- [PROXY] Error during tool execution (${toolName}) ---`);
             console.error(`Full Axios Error:`, error.message);
             // If the error has an Axios response, handle it as an SFD API error.
             if (error.response) {
-                return handleSfdResponse({ status: error.response.status, data: error.response.data }, res, toolCallId);
+                return handleSfdResponse(error.response, res, toolCallId);
             } else {
                 // Otherwise, it's a proxy-internal error (e.g., network timeout, etc.).
                 const vapiErrorResponse = {
