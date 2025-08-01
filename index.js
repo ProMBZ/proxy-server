@@ -75,8 +75,9 @@ async function acquireOrRefreshToken(forceRefresh = false) {
     let grantTypeToUse = 'refresh_token';
     let refreshTokenValue = tokenStore.refreshToken;
 
-    // If no refresh token is in memory, try to use the one from the environment variable.
-    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== '90dc9fbb15ca472bab61fee5d54f21c87cda571aa458429cbdbabf56bedbad11') {
+    // --- LOGIC UPDATED HERE: Removed a conditional that prevented the default token from being used. ---
+    // If no refresh token is in memory, use the one from the environment variable.
+    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN) {
         refreshTokenValue = INITIAL_REFRESH_TOKEN;
         console.log('[AUTH] Using INITIAL_REFRESH_TOKEN from environment variable.');
     } else if (!refreshTokenValue) {
