@@ -43,7 +43,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the proxy to bootstrap authentication
 // without manual intervention. It must be set as an environment variable.
-const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'f4fb0e5db04545a1b598def874b38543aedc8a93408d4cccb1ff5a57576e5a9e';
+const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '90dc9fbb15ca472bab61fee5d54f21c87cda571aa458429cbdbabf56bedbad11';
 
 // --- 5. In-Memory Cache for Tokens ---
 // We store the tokens in memory to avoid requesting a new token for every API call.
@@ -76,7 +76,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
     let refreshTokenValue = tokenStore.refreshToken;
 
     // If no refresh token is in memory, try to use the one from the environment variable.
-    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== 'f4fb0e5db04545a1b598def874b38543aedc8a93408d4cccb1ff5a57576e5a9e') {
+    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== '90dc9fbb15ca472bab61fee5d54f21c87cda571aa458429cbdbabf56bedbad11') {
         refreshTokenValue = INITIAL_REFRESH_TOKEN;
         console.log('[AUTH] Using INITIAL_REFRESH_TOKEN from environment variable.');
     } else if (!refreshTokenValue) {
