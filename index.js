@@ -75,7 +75,6 @@ async function acquireOrRefreshToken(forceRefresh = false) {
     let grantTypeToUse = 'refresh_token';
     let refreshTokenValue = tokenStore.refreshToken;
 
-    // --- LOGIC UPDATED HERE: Removed a conditional that prevented the default token from being used. ---
     // If no refresh token is in memory, use the one from the environment variable.
     if (!refreshTokenValue && INITIAL_REFRESH_TOKEN) {
         refreshTokenValue = INITIAL_REFRESH_TOKEN;
@@ -354,13 +353,11 @@ async function cancelAppointment(args) {
 app.post('/api/tool', async (req, res) => {
     console.log('[PROXY_DISPATCH] Received webhook.');
 
-    // Check if body is empty, which can happen with certain webhook types.
     if (!req.rawBody) {
         console.error('[PROXY_DISPATCH] Error: Received webhook with empty body. Vapi is likely sending an empty request.');
-        return res.status(200).send('Webhook body was empty.');
+        return res.status(200).json({ received: true });
     }
 
-    // Try to parse the raw body as JSON.
     let body;
     try {
         body = JSON.parse(req.rawBody);
@@ -369,84 +366,92 @@ app.post('/api/tool', async (req, res) => {
         return res.status(400).send('Invalid JSON in request body.');
     }
 
-    // Check if the webhook is a "tool-calls" message.
-    if (body.message && body.message.type === 'tool-calls') {
-        const { toolCallId, toolName, toolArguments } = body.message;
+    // Check if the webhook is a Vapi message and has a type.
+    if (!body.message || !body.message.type) {
+        console.warn('[PROXY_DISPATCH] Received webhook with an unexpected format. Body:', JSON.stringify(body));
+        return res.status(200).json({ received: true });
+    }
 
-        // Validate the incoming Vapi webhook structure.
-        if (!toolCallId || !toolName || !toolArguments) {
-            console.error('[PROXY_DISPATCH] Invalid Vapi tool call webhook format. Missing core fields. Body:', JSON.stringify(body));
-            return res.status(400).json({ error: 'Invalid Vapi tool call webhook format.' });
-        }
+    // Use a switch statement to dispatch based on the message type, as recommended.
+    switch (body.message.type) {
+        case 'tool-calls':
+            const { toolCallId, toolName, toolArguments } = body.message;
 
-        // Log the tool call for better debugging.
-        console.log(`[PROXY_DISPATCH] Received tool call: ${toolName} with arguments:`, toolArguments);
-
-        // Ensure we have a valid access token before making any API calls.
-        const tokenAcquired = await acquireOrRefreshToken();
-        if (!tokenAcquired) {
-            console.error('[PROXY_DISPATCH] Failed to obtain valid access token for tool call:', toolName);
-            return res.status(200).json({
-                results: [{
-                    toolCallId: toolCallId,
-                    error: 'Proxy Error: Failed to obtain valid authentication token for SFD API.'
-                }]
-            });
-        }
-
-        let sfdAxiosResponse;
-
-        try {
-            // Use a switch statement to dispatch the call to the appropriate tool function.
-            switch (toolName) {
-                case 'getAvailableDentists':
-                    sfdAxiosResponse = await getAvailableDentists(toolArguments);
-                    break;
-                case 'getAvailableBooks':
-                    sfdAxiosResponse = await getAvailableBooks(toolArguments);
-                    break;
-                case 'registerNewUser':
-                    sfdAxiosResponse = await registerNewUser(toolArguments);
-                    break;
-                case 'bookAppointment':
-                    sfdAxiosResponse = await bookAppointment(toolArguments);
-                    break;
-                case 'cancelAppointment':
-                    sfdAxiosResponse = await cancelAppointment(toolArguments);
-                    break;
-                default:
-                    console.warn(`[PROXY_DISPATCH] Unknown tool name received: ${toolName}`);
-                    return res.status(200).json({
-                        results: [{
-                            toolCallId: toolCallId,
-                            error: `Unknown tool: ${toolName}`
-                        }]
-                    });
+            if (!toolCallId || !toolName || !toolArguments) {
+                console.error('[PROXY_DISPATCH] Invalid Vapi tool call webhook format. Missing core fields. Body:', JSON.stringify(body));
+                return res.status(400).json({ error: 'Invalid Vapi tool call webhook format.' });
             }
-            // Format and send the response back to Vapi.
-            return handleSfdResponse(sfdAxiosResponse, res, toolCallId);
-        } catch (error) {
-            // Catch any errors that occur during the tool execution.
-            console.error(`--- [PROXY] Error during tool execution (${toolName}) ---`);
-            console.error(`Full Axios Error:`, error.message);
-            // If the error has an Axios response, handle it as an SFD API error.
-            if (error.response) {
-                return handleSfdResponse(error.response, res, toolCallId);
-            } else {
-                // Otherwise, it's a proxy-internal error (e.g., network timeout, etc.).
-                const vapiErrorResponse = {
+
+            console.log(`[PROXY_DISPATCH] Received tool call: ${toolName} with arguments:`, toolArguments);
+
+            const tokenAcquired = await acquireOrRefreshToken();
+            if (!tokenAcquired) {
+                console.error('[PROXY_DISPATCH] Failed to obtain valid access token for tool call:', toolName);
+                return res.status(200).json({
                     results: [{
                         toolCallId: toolCallId,
-                        error: `Proxy internal error during ${toolName} call: ${error.message}.`
+                        error: 'Proxy Error: Failed to obtain valid authentication token for SFD API.'
                     }]
-                };
-                return res.status(200).json(vapiErrorResponse);
+                });
             }
-        }
-    } else {
-        // Log and ignore any webhook types we don't handle.
-        console.log(`[PROXY_DISPATCH] Received unhandled Vapi webhook type: ${body.message ? body.message.type : 'unknown'}. Body: ${req.rawBody}`);
-        return res.status(200).send('Unhandled webhook type received.');
+
+            let sfdAxiosResponse;
+
+            try {
+                switch (toolName) {
+                    case 'getAvailableDentists':
+                        sfdAxiosResponse = await getAvailableDentists(toolArguments);
+                        break;
+                    case 'getAvailableBooks':
+                        sfdAxiosResponse = await getAvailableBooks(toolArguments);
+                        break;
+                    case 'registerNewUser':
+                        sfdAxiosResponse = await registerNewUser(toolArguments);
+                        break;
+                    case 'bookAppointment':
+                        sfdAxiosResponse = await bookAppointment(toolArguments);
+                        break;
+                    case 'cancelAppointment':
+                        sfdAxiosResponse = await cancelAppointment(toolArguments);
+                        break;
+                    default:
+                        console.warn(`[PROXY_DISPATCH] Unknown tool name received: ${toolName}`);
+                        return res.status(200).json({
+                            results: [{
+                                toolCallId: toolCallId,
+                                error: `Unknown tool: ${toolName}`
+                            }]
+                        });
+                }
+                return handleSfdResponse(sfdAxiosResponse, res, toolCallId);
+            } catch (error) {
+                console.error(`--- [PROXY] Error during tool execution (${toolName}) ---`);
+                console.error(`Full Axios Error:`, error.message);
+                if (error.response) {
+                    return handleSfdResponse(error.response, res, toolCallId);
+                } else {
+                    const vapiErrorResponse = {
+                        results: [{
+                            toolCallId: toolCallId,
+                            error: `Proxy internal error during ${toolName} call: ${error.message}.`
+                        }]
+                    };
+                    return res.status(200).json(vapiErrorResponse);
+                }
+            }
+        
+        // Add other Vapi message types you want to handle here.
+        // For example, 'status-update' or 'transcript'.
+        // case 'status-update':
+        //   console.log('[VAPI] Status update received:', body.message.status);
+        //   // Do something with the status, but always return a 200.
+        //   return res.status(200).json({ received: true });
+        
+        default:
+            // This is the new, more explicit handling for all other message types.
+            console.log(`[PROXY_DISPATCH] Received unhandled Vapi webhook type: ${body.message.type}.`);
+            // We return a 200 OK to prevent Vapi from retrying the webhook.
+            return res.status(200).json({ received: true });
     }
 });
 
