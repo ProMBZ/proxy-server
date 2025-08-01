@@ -76,7 +76,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
     let refreshTokenValue = tokenStore.refreshToken;
 
     // If no refresh token is in memory, try to use the one from the environment variable.
-    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== 'YOUR_FRESH_REFRESH_TOKEN_HERE') {
+    if (!refreshTokenValue && INITIAL_REFRESH_TOKEN && INITIAL_REFRESH_TOKEN !== 'f4fb0e5db04545a1b598def874b38543aedc8a93408d4cccb1ff5a57576e5a9e') {
         refreshTokenValue = INITIAL_REFRESH_TOKEN;
         console.log('[AUTH] Using INITIAL_REFRESH_TOKEN from environment variable.');
     } else if (!refreshTokenValue) {
@@ -261,18 +261,37 @@ async function getAvailableBooks(args) {
 
 /**
  * Registers a new patient with the SFD API.
+ * This function has been updated to use the dynamic details provided by the user.
  * @param {object} args - The arguments from the Vapi tool call.
  */
 async function registerNewUser(args) {
-    const { forename, surname, dob, mobile, email } = args;
+    // Correctly destructure all the fields provided by the AI from the user's conversation.
+    const { forename, surname, dob, mobile, email, title, gender, street, city, county, postcode } = args;
+    
+    // Construct the request body using the dynamic data.
     const requestBody = {
-        surname: surname, forename: forename, title: "Mr", gender: "Male", dob: dob,
-        address: { street: "123 Dummy St", city: "Dummy City", county: "Dummy County", postcode: "DU1 1MY" },
-        phone: { home: "00000000000", mobile: mobile, work: "00000000000" },
+        surname: surname,
+        forename: forename,
+        title: title, // Use the provided title
+        gender: gender, // Use the provided gender
+        dob: dob,
+        address: {
+            street: street, // Use the provided street
+            city: city, // Use the provided city
+            county: county, // Use the provided county
+            postcode: postcode, // Use the provided postcode
+        },
+        phone: {
+            home: mobile, // Use the mobile number for home phone as a fallback
+            mobile: mobile,
+            work: mobile // Use the mobile number for work phone as a fallback
+        },
         email: email
     };
+    
     const url = `${SFD_BASE_URL}/patient/register`;
     console.log(`[TOOL] Calling registerNewUser: ${url} with body:`, JSON.stringify(requestBody));
+    
     const response = await axios.post(url, requestBody, {
         headers: {
             'Authorization': `Bearer ${tokenStore.accessToken}`,
