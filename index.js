@@ -1,4 +1,4 @@
-// index.js - Render.com Proxy Server with Robust Token Refresh using INITIAL_REFRESH_TOKEN
+// index.js - Updated Node.js Proxy Server for Vapi with SFD API Tools
 
 const express = require('express');
 const axios = require('axios'); // Used for making HTTP requests
@@ -64,9 +64,6 @@ async function acquireOrRefreshToken(forceRefresh = false) {
         console.log('[AUTH] Using INITIAL_REFRESH_TOKEN from environment variable.');
     } else if (!refreshTokenValue) {
         // Fallback to password grant if no refresh token is available at all
-        // This should ideally only happen on the very first run if INITIAL_REFRESH_TOKEN isn't set
-        // or if the initial password grant is the only way to get a first token.
-        // For Render.com, INITIAL_REFRESH_TOKEN is preferred for restarts.
         grantTypeToUse = 'password';
         console.warn('[AUTH] No refresh token available in memory or env. Falling back to password grant.');
     }
@@ -76,14 +73,12 @@ async function acquireOrRefreshToken(forceRefresh = false) {
         const tokenUrl = `${SFD_BASE_URL}/oauth2/token`;
 
         if (grantTypeToUse === 'password') {
-            // NOTE: Hardcoding username/password here. For production, consider other secure methods
-            // if INITIAL_REFRESH_TOKEN cannot be used as primary.
             requestData = {
                 grant_type: 'password',
                 client_id: SFD_CLIENT_ID,
                 client_secret: SFD_CLIENT_SECRET,
-                username: 'C5WH', // Placeholder: Replace with actual username if needed for password grant
-                password: 'jaVathee123!', // Placeholder: Replace with actual password if needed for password grant
+                username: 'C5WH', // Placeholder
+                password: 'jaVathee123!', // Placeholder
             };
             console.log('[AUTH] Attempting OAuth2 password grant...');
         } else { // grantTypeToUse === 'refresh_token'
@@ -96,7 +91,6 @@ async function acquireOrRefreshToken(forceRefresh = false) {
                 client_id: SFD_CLIENT_ID,
                 client_secret: SFD_CLIENT_SECRET,
                 refresh_token: refreshTokenValue,
-                // REMOVED: scope: 'API' - As per previous debugging, the API seems to reject this during refresh if it doesn't match previous or expects no scope.
             };
             console.log('[AUTH] Attempting OAuth2 refresh_token grant...');
         }
@@ -116,7 +110,6 @@ async function acquireOrRefreshToken(forceRefresh = false) {
         const tokenData = tokenResponse.data;
 
         if (tokenResponse.status === 200 && tokenData.access_token) {
-            // Check if OAuth2 returned an error object despite 200 OK (some APIs do this)
             if (tokenData.error) {
                 console.error('[AUTH] OAuth2 grant failed (API error in 200 response):', tokenData.error_description || tokenData.error);
                 throw new Error(tokenData.error_description || tokenData.error || 'OAuth2 grant failed with API error.');
@@ -124,21 +117,20 @@ async function acquireOrRefreshToken(forceRefresh = false) {
 
             console.log('[AUTH] OAuth2 token acquisition successful. Validating new token...');
 
-            // Test the new token against /Practice endpoint to ensure it's truly valid
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+                validateStatus: (status) => status >= 200 && status < 500, // Handle non-2xx status
                 timeout: 10000 // 10 seconds timeout for validation
             });
 
             if (testResponse.status === 200) {
                 console.log('[AUTH] New access token successfully validated.');
                 tokenStore.accessToken = tokenData.access_token;
-                // Set expiry with a 5-minute buffer
                 tokenStore.expiresAt = Date.now() + (tokenData.expires_in * 1000) - (5 * 60 * 1000);
                 if (tokenData.refresh_token) {
-                    tokenStore.refreshToken = tokenData.refresh_token; // Always update refresh token if provided
+                    tokenStore.refreshToken = tokenData.refresh_token;
                 }
-                return true; // Token acquisition successful
+                return true;
             } else {
                 console.error(`[AUTH] New access token validation failed: ${testResponse.status} ${testResponse.statusText}`);
                 throw new Error('New access token lacks account association or is invalid after acquisition.');
@@ -150,19 +142,15 @@ async function acquireOrRefreshToken(forceRefresh = false) {
         }
     } catch (error) {
         console.error('[AUTH] Error during token acquisition/refresh:', error.message);
-        // Invalidate current tokens on error to force a new attempt later
         tokenStore.accessToken = null;
-        tokenStore.refreshToken = null; // Clear refresh token if it failed
+        tokenStore.refreshToken = null;
         tokenStore.expiresAt = null;
-        return false; // Token acquisition failed
+        return false;
     }
 }
 
 // --- Helper function to handle SFD responses and format for Vapi ---
-// This centralizes the logic for converting SFD API responses (success or error)
-// into the specific JSON format Vapi expects for tool results.
 function handleSfdResponse(sfdResponse, res, toolCallId) {
-    // Check for SFD API errors (status >= 400 or a custom error object in data)
     if (sfdResponse.status >= 400 || (sfdResponse.data && sfdResponse.data.error)) {
         console.error('--- [SFD API] Error Response ---');
         console.error('Status:', sfdResponse.status);
@@ -177,29 +165,24 @@ function handleSfdResponse(sfdResponse, res, toolCallId) {
             errorMessage += ` Status Text: ${sfdResponse.statusText}`;
         }
 
-        // Vapi expects a 200 OK even for tool errors, with the error details in the 'results' array
         const vapiErrorResponse = {
             results: [{
                 toolCallId: toolCallId,
-                // Truncate error message to fit Vapi's likely limits and prevent excessively long logs
                 error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500)
             }]
         };
         return res.status(200).json(vapiErrorResponse);
     }
 
-    // If SFD API returned success (status < 400), format it as Vapi result
     console.log('--- [SFD API] Success Response ---');
     console.log('Status:', sfdResponse.status);
     console.log('Data:', sfdResponse.data);
 
-    // Stringify the SFD response data to put it into Vapi's 'result' field
     const resultString = JSON.stringify(sfdResponse.data);
 
     const vapiSuccessResponse = {
         results: [{
             toolCallId: toolCallId,
-            // Truncate result string to fit Vapi's likely limits
             result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500)
         }]
     };
@@ -207,12 +190,8 @@ function handleSfdResponse(sfdResponse, res, toolCallId) {
 }
 
 // --- Middleware for all /api/* routes ---
-// This middleware runs before the main proxy logic. Its primary role is to:
-// 1. Ensure a valid access token is available (acquires/refreshes if needed).
-// 2. Add the Authorization header to the request going to the SFD API.
 app.use('/api/*', async (req, res, next) => {
     try {
-        // Ensure a valid token is available. Force refresh if near expiry or invalid.
         const tokenAcquired = await acquireOrRefreshToken();
         if (!tokenAcquired) {
             console.error('[PROXY_MIDDLEWARE] Failed to obtain valid access token. Aborting request.');
@@ -224,9 +203,8 @@ app.use('/api/*', async (req, res, next) => {
                 }]
             });
         }
-        // Add the Authorization header to the request that will be forwarded to the SFD API
         req.headers.authorization = `Bearer ${tokenStore.accessToken}`;
-        next(); // Proceed to the main proxy route handler
+        next();
     } catch (error) {
         console.error('[PROXY_MIDDLEWARE] Error during token acquisition in middleware:', error.message);
         const toolCallId = req.body.toolCallId || 'default_tool_call_id';
@@ -239,146 +217,176 @@ app.use('/api/*', async (req, res, next) => {
     }
 });
 
-// --- Main Proxy Route Handler ---
-// This route handles all incoming requests to '/api/*' and forwards them to the SFD API.
-app.all('/api/*', async (req, res) => {
-    // Extract the target path from the incoming request URL (e.g., '/appointment/books' from '/api/appointment/books')
-    const targetPath = req.path.substring(5); // Removes '/api/'
+// --- Specific API Endpoints for each Vapi Tool ---
+// Each tool has its own dedicated route to handle its specific request format.
 
-    // Construct the full target URL for the SFD API
-    // Ensure there's a '/' between the base URL and the target path
-    let fullTargetUrl = `${SFD_BASE_URL}/${targetPath}`;
-
-    // Extract relevant query parameters from the original URL.
-    // Vapi sometimes adds its own 'url' parameter which should be filtered out.
-    const queryParams = new URLSearchParams(req.originalUrl.split('?')[1]);
-    let sfdApiQueryParams = new URLSearchParams();
-    for (const [key, value] of queryParams.entries()) {
-        if (key !== 'url') { // Exclude Vapi's 'url' parameter
-            sfdApiQueryParams.append(key, value);
-        }
-    }
-
-    if (sfdApiQueryParams.toString()) {
-        fullTargetUrl += `?${sfdApiQueryParams.toString()}`;
-    }
-
-    const method = req.method;
-    // Copy incoming headers, then clean up headers that might cause issues with the target server
-    const headers = { ...req.headers };
-    delete headers.host;
-    delete headers['if-none-match']; // Prevents caching issues
-    delete headers['accept-encoding']; // Prevents compression issues
-    // For GET/HEAD requests, content-length and content-type headers are not applicable
-    if (method === 'GET' || method === 'HEAD') {
-        delete headers['content-length'];
-        delete headers['content-type'];
-    }
-
-    // --- Debugging Logs for Proxy Request ---
-    console.log(`--- [PROXY] Outgoing Request Details ---`);
-    console.log(`Method: ${method}`);
-    console.log(`Original Path: ${req.path}`);
-    console.log(`Target URL: ${fullTargetUrl}`);
-    console.log(`Headers (to SFD):`, headers);
-    console.log(`Body (to SFD):`, req.body); // Body will be empty for GET requests
-    console.log(`--- End [PROXY] Outgoing Request Details ---`);
+// POST: /api/createPatient
+app.post('/api/createPatient', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { forename, surname, dob, patient_email, patient_phone, address_street, address_city, address_postcode, patient_sex, patient_title } = req.body.toolArgs;
 
     try {
-        const axiosConfig = {
-            method: method,
-            url: fullTargetUrl,
-            headers: headers,
-            // Do not throw errors for 4xx responses; handle them explicitly in code
-            validateStatus: function (status) {
-                return status >= 200 && status < 500; // Handle 2xx, 3xx, and 4xx status codes
-            },
-            timeout: 20000 // 20 seconds timeout for API calls
-        };
-
-        // Attach request body for non-GET/HEAD methods
-        if (method !== 'GET' && method !== 'HEAD') {
-            axiosConfig.data = req.body;
-        }
-
-        const sfdResponse = await axios(axiosConfig);
-
-        // Extract toolCallId from Vapi's request body for consistent error/success reporting
-        // Vapi sends toolCallId in the body for POST, but not always for GET.
-        // We'll use a default if not found.
-        const toolCallId = req.body.toolCallId || 'default_tool_call_id';
-
-        // --- Handle 401 Unauthorized: Attempt token refresh and retry ---
-        // If the SFD API returns 401, it means our token is invalid/expired.
-        // We attempt a refresh and then retry the original request.
-        if (sfdResponse.status === 401) {
-            console.warn('[PROXY] SFD API returned 401 Unauthorized. Attempting token refresh and retry...');
-            const refreshSuccess = await acquireOrRefreshToken(true); // Force refresh
-            if (refreshSuccess) {
-                // If refresh was successful, update the Authorization header with the new token
-                // and retry the original request.
-                axiosConfig.headers.authorization = `Bearer ${tokenStore.accessToken}`;
-                console.log('[PROXY] Token refreshed, retrying original request with new token...');
-                const retrySfdResponse = await axios(axiosConfig); // Retry with updated token
-                return handleSfdResponse(retrySfdResponse, res, toolCallId); // Process retry response
-            } else {
-                // If refresh failed, report the 401 error to Vapi
-                console.error('[PROXY] Token refresh failed after 401. Cannot retry request.');
-                const errorMessage = `SFD API Error: Status 401. Token refresh failed. Manual intervention may be required.`;
-                return res.status(200).json({
-                    results: [{
-                        toolCallId: toolCallId,
-                        error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500)
-                    }]
-                });
-            }
-        }
-
-        // For all other responses (2xx, 3xx, or other 4xx/5xx not handled by 401),
-        // process and format them for Vapi.
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
+            forename,
+            surname,
+            dob,
+            patient_email,
+            patient_phone,
+            'address.street': address_street,
+            'address.city': address_city,
+            'address.postcode': address_postcode,
+            patient_sex,
+            patient_title
+        }, { headers: { Authorization: req.headers.authorization } });
         return handleSfdResponse(sfdResponse, res, toolCallId);
-
     } catch (error) {
-        // Catch any network errors or errors from axios itself (e.g., DNS lookup failed, connection refused, timeout)
-        console.error(`--- [PROXY] Internal Error Catch Block ---`);
-        console.error(`Full Axios Error:`, error.message);
-        if (error.response) {
-            console.error(`Error Response Status:`, error.response.status);
-            console.error(`Error Response Data:`, error.response.data);
-            console.error(`Error Response Headers:`, error.response.headers);
-        } else if (error.request) {
-            console.error(`Error Request (no response):`, error.request);
-        } else {
-            console.error(`General Error message:`, error.message);
-        }
-        console.error(`Error Stack:`, error.stack);
-        console.error(`--- End [PROXY] Internal Error Catch Block ---`);
+        return handleProxyError(error, res, toolCallId);
+    }
+});
 
-        // Format proxy internal errors for Vapi
-        const toolCallId = req.body.toolCallId || 'default_tool_call_id';
-        const vapiErrorResponse = {
-            results: [{
-                toolCallId: toolCallId,
-                error: `Proxy internal error: ${error.message}. Check proxy logs for more details.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
-            }]
-        };
-        return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks
+// POST: /api/searchPatient
+app.post('/api/searchPatient', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { forename, surname, dob } = req.body.toolArgs;
+    
+    try {
+        const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
+            params: { forename, surname, dob },
+            headers: { Authorization: req.headers.authorization }
+        });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/getAvailableDates
+app.post('/api/getAvailableDates', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { year, month, app_rsn_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
+            params: { year, month, app_rsn_id },
+            headers: { Authorization: req.headers.authorization }
+        });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/getAvailableTimes
+app.post('/api/getAvailableTimes', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { date, app_rsn_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
+            params: { date, app_rsn_id },
+            headers: { Authorization: req.headers.authorization }
+        });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/reserveSlot
+app.post('/api/reserveSlot', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { date, time, app_rsn_id, patient_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, {
+            date,
+            time,
+            app_rsn_id,
+            patient_id
+        }, { headers: { Authorization: req.headers.authorization } });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/bookAppointment
+app.post('/api/bookAppointment', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { app_rec_id, patient_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, {
+            app_rec_id,
+            patient_id
+        }, { headers: { Authorization: req.headers.authorization } });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/cancelAppointment
+app.post('/api/cancelAppointment', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { app_rec_id, app_can_id, patient_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, {
+            app_rec_id,
+            app_can_id,
+            patient_id
+        }, { headers: { Authorization: req.headers.authorization } });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
+    }
+});
+
+// POST: /api/getPatientAppointments
+app.post('/api/getPatientAppointments', async (req, res) => {
+    const toolCallId = req.body.toolCallId;
+    const { patient_id } = req.body.toolArgs;
+
+    try {
+        const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
+            params: { patient_id },
+            headers: { Authorization: req.headers.authorization }
+        });
+        return handleSfdResponse(sfdResponse, res, toolCallId);
+    } catch (error) {
+        return handleProxyError(error, res, toolCallId);
     }
 });
 
 // --- Simple Test Endpoint for Proxy Status ---
-// You can visit this URL directly in your browser to check if the proxy server is running.
 app.get('/', (req, res) => {
     res.send('CORS Proxy is running and token management is active.');
 });
 
+// --- Helper function for cleaner error handling in routes ---
+function handleProxyError(error, res, toolCallId) {
+    console.error(`--- [PROXY] Internal Error Catch Block ---`);
+    console.error(`Full Axios Error:`, error.message);
+    if (error.response) {
+        console.error(`Error Response Status:`, error.response.status);
+        console.error(`Error Response Data:`, error.response.data);
+    }
+    console.error(`--- End [PROXY] Internal Error Catch Block ---`);
+
+    const vapiErrorResponse = {
+        results: [{
+            toolCallId: toolCallId,
+            error: `Proxy internal error: ${error.message}. Check proxy logs for more details.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
+        }]
+    };
+    return res.status(200).json(vapiErrorResponse);
+}
+
 // --- Server Start and Initial Token Acquisition ---
-// When the server starts, it immediately tries to get an initial access token.
-// This ensures the proxy is ready to serve requests with a valid token from the beginning.
 app.listen(PORT, async () => {
     console.log(`Proxy server listening on port ${PORT}`);
     console.log('[INIT] Attempting initial token acquisition...');
-    // Attempt to acquire/refresh token. It will prioritize INITIAL_REFRESH_TOKEN if available.
     const initialTokenAcquired = await acquireOrRefreshToken();
     if (!initialTokenAcquired) {
         console.error('[INIT] Initial token acquisition failed. Proxy might not function correctly until a valid token is obtained. Please ensure INITIAL_REFRESH_TOKEN env var is valid.');
