@@ -23,7 +23,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
-const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'a5a5535240cb4a67a316bf43b00db20408370be935504820a69a6ecd885c320a'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
+const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '0a8f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
 
 // --- In-Memory Cache for Tokens ---
 // This cache helps avoid constant token acquisition. It will be reset on service restarts.
