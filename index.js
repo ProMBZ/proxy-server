@@ -233,14 +233,28 @@ app.use('/api/*', async (req, res, next) => {
 // POST: /api/createPatient
 app.post('/api/createPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
-    const { forename, surname, dob, patient_email, patient_phone, address_street, address_city, address_postcode, patient_sex, patient_title } = req.body;
+    // Log the incoming request body to debug what Vapi is sending
+    console.log(`[createPatient] Received req.body:`, req.body);
+
+    // Destructure directly from req.body, providing a default empty string for patient_title
+    const { 
+        forename, 
+        surname, 
+        dob, 
+        patient_email, 
+        patient_phone, 
+        address_street, 
+        address_city, 
+        address_postcode, 
+        patient_sex, 
+        patient_title = '' // Default to empty string if not provided
+    } = req.body;
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
             surname,
             forename,
-            title: patient_title,
+            title: patient_title, 
             gender: patient_sex,
             dob,
             address: { // Nested object for address
@@ -262,7 +276,6 @@ app.post('/api/createPatient', async (req, res) => {
 // POST: /api/searchPatient
 app.post('/api/searchPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { forename, surname, dob } = req.body;
     
     try {
@@ -279,7 +292,6 @@ app.post('/api/searchPatient', async (req, res) => {
 // POST: /api/getAvailableDates
 app.post('/api/getAvailableDates', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { year, month, app_rsn_id } = req.body;
 
     try {
@@ -296,7 +308,6 @@ app.post('/api/getAvailableDates', async (req, res) => {
 // POST: /api/getAvailableTimes
 app.post('/api/getAvailableTimes', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { date, app_rsn_id } = req.body;
 
     try {
@@ -313,7 +324,6 @@ app.post('/api/getAvailableTimes', async (req, res) => {
 // POST: /api/reserveSlot
 app.post('/api/reserveSlot', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { date, time, app_rsn_id, patient_id } = req.body;
 
     try {
@@ -332,7 +342,6 @@ app.post('/api/reserveSlot', async (req, res) => {
 // POST: /api/bookAppointment
 app.post('/api/bookAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { app_rec_id, patient_id } = req.body;
 
     try {
@@ -349,7 +358,6 @@ app.post('/api/bookAppointment', async (req, res) => {
 // POST: /api/cancelAppointment
 app.post('/api/cancelAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { app_rec_id, app_can_id, patient_id } = req.body;
 
     try {
@@ -367,7 +375,6 @@ app.post('/api/cancelAppointment', async (req, res) => {
 // POST: /api/getPatientAppointments
 app.post('/api/getPatientAppointments', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Corrected: Destructure directly from req.body, not req.body.toolArgs
     const { patient_id } = req.body;
 
     try {
