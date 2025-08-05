@@ -236,7 +236,7 @@ app.post('/api/createPatient', async (req, res) => {
     // Log the incoming request body to debug what Vapi is sending
     console.log(`[createPatient] Received req.body:`, req.body);
 
-    // Destructure directly from req.body, providing a default empty string for patient_title
+    // Destructure directly from req.body
     const { 
         forename, 
         surname, 
@@ -247,8 +247,10 @@ app.post('/api/createPatient', async (req, res) => {
         address_city, 
         address_postcode, 
         patient_sex, 
-        patient_title = '' // Default to empty string if not provided
     } = req.body;
+
+    // Handle the patient_title, checking for both 'patient_title' and 'patient_title\n'
+    const patient_title = req.body.patient_title || req.body['patient_title\n'] || '';
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
