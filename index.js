@@ -95,6 +95,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
             console.log('[AUTH] Attempting OAuth2 refresh_token grant...');
         }
 
+        console.time('[AUTH] Token Request Duration');
         const tokenResponse = await axios.post(
             tokenUrl,
             qs.stringify(requestData),
@@ -103,9 +104,10 @@ async function acquireOrRefreshToken(forceRefresh = false) {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Accept': 'application/json'
                 },
-                timeout: 15000 // 15 seconds timeout for token request
+                timeout: 30000 // Increased timeout to 30 seconds for token request
             }
         );
+        console.timeEnd('[AUTH] Token Request Duration');
 
         const tokenData = tokenResponse.data;
 
@@ -117,12 +119,13 @@ async function acquireOrRefreshToken(forceRefresh = false) {
 
             console.log('[AUTH] OAuth2 token acquisition successful. Validating new token...');
 
-            // Validate the token by making a simple request to a protected endpoint
+            console.time('[AUTH] Token Validation Request Duration');
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
                 validateStatus: (status) => status >= 200 && status < 500, // Handle non-2xx status
-                timeout: 10000 // 10 seconds timeout for validation
+                timeout: 30000 // Increased timeout to 30 seconds for validation
             });
+            console.timeEnd('[AUTH] Token Validation Request Duration');
 
             if (testResponse.status === 200) {
                 console.log('[AUTH] New access token successfully validated.');
@@ -262,8 +265,7 @@ app.post('/api/createPatient', async (req, res) => {
     }
 
     try {
-        console.log(`[createPatient] Sending to SFD API: title=${patient_title}, gender=${patient_sex}, dob=${dob}, etc.`);
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
+        const payload = {
             surname,
             forename,
             title: patient_title, 
@@ -278,7 +280,17 @@ app.post('/api/createPatient', async (req, res) => {
                 mobile: patient_phone // Assuming patient_phone is mobile
             },
             email: patient_email
-        }, { headers: { Authorization: req.headers.authorization } });
+        };
+        console.log(`[createPatient] Sending to SFD API (${SFD_BASE_URL}/patient/register) with payload:`, JSON.stringify(payload));
+        console.time('[createPatient] SFD API Call Duration');
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, 
+            payload,
+            { 
+                headers: { Authorization: req.headers.authorization },
+                timeout: 30000 // Increased timeout to 30 seconds
+            }
+        );
+        console.timeEnd('[createPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -291,10 +303,15 @@ app.post('/api/searchPatient', async (req, res) => {
     const { forename, surname, dob } = req.body;
     
     try {
+        const params = { forename, surname, dob };
+        console.log(`[searchPatient] Sending to SFD API (${SFD_BASE_URL}/patient/search) with params:`, JSON.stringify(params));
+        console.time('[searchPatient] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
-            params: { forename, surname, dob }, // Parameters for GET request
-            headers: { Authorization: req.headers.authorization }
+            params: params, // Parameters for GET request
+            headers: { Authorization: req.headers.authorization },
+            timeout: 30000 // Increased timeout to 30 seconds
         });
+        console.timeEnd('[searchPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -307,10 +324,15 @@ app.post('/api/getAvailableDates', async (req, res) => {
     const { year, month, app_rsn_id } = req.body;
 
     try {
+        const params = { year, month, app_rsn_id };
+        console.log(`[getAvailableDates] Sending to SFD API (${SFD_BASE_URL}/appointment/dates) with params:`, JSON.stringify(params));
+        console.time('[getAvailableDates] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
-            params: { year, month, app_rsn_id },
-            headers: { Authorization: req.headers.authorization }
+            params: params,
+            headers: { Authorization: req.headers.authorization },
+            timeout: 30000 // Increased timeout to 30 seconds
         });
+        console.timeEnd('[getAvailableDates] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -323,10 +345,15 @@ app.post('/api/getAvailableTimes', async (req, res) => {
     const { date, app_rsn_id } = req.body;
 
     try {
+        const params = { date, app_rsn_id };
+        console.log(`[getAvailableTimes] Sending to SFD API (${SFD_BASE_URL}/appointment/times) with params:`, JSON.stringify(params));
+        console.time('[getAvailableTimes] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
-            params: { date, app_rsn_id },
-            headers: { Authorization: req.headers.authorization }
+            params: params,
+            headers: { Authorization: req.headers.authorization },
+            timeout: 30000 // Increased timeout to 30 seconds
         });
+        console.timeEnd('[getAvailableTimes] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -339,12 +366,17 @@ app.post('/api/reserveSlot', async (req, res) => {
     const { date, time, app_rsn_id, patient_id } = req.body;
 
     try {
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, {
-            date,
-            time,
-            app_rsn_id,
-            patient_id
-        }, { headers: { Authorization: req.headers.authorization } });
+        const payload = { date, time, app_rsn_id, patient_id };
+        console.log(`[reserveSlot] Sending to SFD API (${SFD_BASE_URL}/appointment/reserve) with payload:`, JSON.stringify(payload));
+        console.time('[reserveSlot] SFD API Call Duration');
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, 
+            payload,
+            { 
+                headers: { Authorization: req.headers.authorization },
+                timeout: 30000 // Increased timeout to 30 seconds
+            }
+        );
+        console.timeEnd('[reserveSlot] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -357,10 +389,17 @@ app.post('/api/bookAppointment', async (req, res) => {
     const { app_rec_id, patient_id } = req.body;
 
     try {
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, {
-            app_rec_id,
-            patient_id
-        }, { headers: { Authorization: req.headers.authorization } });
+        const payload = { app_rec_id, patient_id };
+        console.log(`[bookAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/book) with payload:`, JSON.stringify(payload));
+        console.time('[bookAppointment] SFD API Call Duration');
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, 
+            payload,
+            { 
+                headers: { Authorization: req.headers.authorization },
+                timeout: 30000 // Increased timeout to 30 seconds
+            }
+        );
+        console.timeEnd('[bookAppointment] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -373,11 +412,17 @@ app.post('/api/cancelAppointment', async (req, res) => {
     const { app_rec_id, app_can_id, patient_id } = req.body;
 
     try {
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, {
-            app_rec_id,
-            app_can_id,
-            patient_id
-        }, { headers: { Authorization: req.headers.authorization } });
+        const payload = { app_rec_id, app_can_id, patient_id };
+        console.log(`[cancelAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/cancel) with payload:`, JSON.stringify(payload));
+        console.time('[cancelAppointment] SFD API Call Duration');
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, 
+            payload,
+            { 
+                headers: { Authorization: req.headers.authorization },
+                timeout: 30000 // Increased timeout to 30 seconds
+            }
+        );
+        console.timeEnd('[cancelAppointment] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -390,10 +435,15 @@ app.post('/api/getPatientAppointments', async (req, res) => {
     const { patient_id } = req.body;
 
     try {
+        const params = { patient_id };
+        console.log(`[getPatientAppointments] Sending to SFD API (${SFD_BASE_URL}/patient/appointments/current) with params:`, JSON.stringify(params));
+        console.time('[getPatientAppointments] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
-            params: { patient_id },
-            headers: { Authorization: req.headers.authorization }
+            params: params,
+            headers: { Authorization: req.headers.authorization },
+            timeout: 30000 // Increased timeout to 30 seconds
         });
+        console.timeEnd('[getPatientAppointments] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
         return handleProxyError(error, res, toolCallId);
@@ -409,10 +459,19 @@ app.get('/', (req, res) => {
 // --- Helper function for cleaner error handling in routes ---
 function handleProxyError(error, res, toolCallId) {
     console.error(`--- [PROXY] Internal Error Catch Block ---`);
-    console.error(`Full Axios Error:`, error.message);
+    console.error(`Error Type: ${error.name || 'Unknown'}`);
+    console.error(`Error Message:`, error.message);
+    if (error.code === 'ECONNABORTED') {
+        console.error('This was a timeout error. The request took too long to complete.');
+    }
     if (error.response) {
         console.error(`Error Response Status:`, error.response.status);
         console.error(`Error Response Data:`, error.response.data);
+    } else if (error.request) {
+        console.error('Error Request: The request was made but no response was received.');
+        console.error('Request details:', error.request);
+    } else {
+        console.error('Error Config:', error.config);
     }
     console.error(`--- End [PROXY] Internal Error Catch Block ---`);
 
