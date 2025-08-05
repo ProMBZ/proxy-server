@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: false }));
 // If not set, the hardcoded defaults will be used (less secure for production).
 const SFD_BASE_URL = process.env.SFD_BASE_URL || 'https://sfd.co:6500';
 const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
-const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // Corrected Client Secret based on previous logs
+const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a'; // Corrected Client Secret based on previous logs
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
 const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '0a8f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
