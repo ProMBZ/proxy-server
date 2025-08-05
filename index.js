@@ -271,59 +271,61 @@ app.post('/api/createPatient', async (req, res) => {
     const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
     console.log(`[createPatient] Original patient_phone: ${patient_phone}, Sanitized: ${sanitized_patient_phone}`);
 
-    // --- Even More Aggressive Truncation for all string fields ---
-    // These truncations are for diagnostic purposes. Adjust or remove once the problematic field is identified.
-    const final_surname = surname ? String(surname).substring(0, 9) : ''; // Truncate surname to 9 chars
-    const final_forename = forename ? String(forename).substring(0, 8) : ''; // Truncate forename to 8 chars
-    const final_patient_title = patient_title ? String(patient_title).substring(0, 3) : ''; // Truncate title to 3 chars (e.g., Mr., Ms., Dr.)
-    const final_patient_sex = patient_sex ? String(patient_sex).substring(0, 4) : ''; // Truncate sex to 4 chars (e.g., male, female)
-    const final_address_street = address_street ? String(address_street).substring(0, 20) : ''; // Truncate street to 20 chars
-    const final_address_city = address_city ? String(address_city).substring(0, 7) : ''; // Truncate city to 7 chars
-    const final_address_postcode = address_postcode ? String(address_postcode).substring(0, 5) : ''; // Truncate postcode to 5 chars (UK postcodes are max 8 chars including space)
-    const final_patient_phone_mobile = sanitized_patient_phone ? String(sanitized_patient_phone).substring(0, 12) : ''; // Truncate phone to 12 digits (common international max)
-    const final_patient_email = patient_email ? String(patient_email).substring(0, 20) : ''; // Truncate email to 20 chars
-    
-    // New fields from Postman collection review
-    const final_address_county = ''; // Default to empty string, truncate if needed
-    const final_phone_home = ''; // Default to empty string, truncate if needed
-    const final_phone_work = ''; // Default to empty string, truncate if needed
+    // --- DEEP DIVE TRUNCATION: Set all string fields to very small lengths for testing ---
+    // The goal is to get a successful response first, then increase lengths one by one.
+    const TRUNCATION_LENGTH = 1; // Start with 1 character for all fields
 
-    // --- End Aggressive Truncation ---
+    const final_surname = surname ? String(surname).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_forename = forename ? String(forename).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_patient_title = patient_title ? String(patient_title).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_patient_sex = patient_sex ? String(patient_sex).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_address_street = address_street ? String(address_street).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_address_city = address_city ? String(address_city).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_address_postcode = address_postcode ? String(address_postcode).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_patient_phone_mobile = sanitized_patient_phone ? String(sanitized_patient_phone).substring(0, TRUNCATION_LENGTH) : ''; 
+    const final_patient_email = patient_email ? String(patient_email).substring(0, TRUNCATION_LENGTH) : ''; 
+    
+    // Fields from Postman collection review, also truncated to TRUNCATION_LENGTH
+    const final_address_county = ''; // Default to empty string, SFD API might expect this field
+    const final_phone_home = ''; // Default to empty string
+    const final_phone_work = ''; // Default to empty string
+
+    // --- End DEEP DIVE TRUNCATION ---
 
     try {
         const payload = {
             surname: final_surname, 
             forename: final_forename, 
-            title: final_patient_title, // Use truncated title
-            gender: final_patient_sex, // Use truncated sex
+            title: final_patient_title, 
+            gender: final_patient_sex, 
             dob,
-            address: { // Nested object for address
+            address: { 
                 street: final_address_street, 
                 city: final_address_city, 
-                county: final_address_county, // Added county
+                county: final_address_county, 
                 postcode: final_address_postcode
             },
-            phone: { // Nested object for phone
-                home: final_phone_home, // Added home phone
-                mobile: final_patient_phone_mobile, // Use truncated phone number
-                work: final_phone_work // Added work phone
+            phone: { 
+                home: final_phone_home, 
+                mobile: final_patient_phone_mobile, 
+                work: final_phone_work 
             },
             email: final_patient_email
         };
 
-        // --- Log lengths of string fields in the final payload ---
-        console.log(`[createPatient] Final Payload String Lengths:`);
+        // --- Log lengths of string fields in the final payload for debugging ---
+        console.log(`[createPatient] Final Payload String Lengths (Deep Dive Test):`);
         console.log(`  surname: ${payload.surname ? payload.surname.length : 0}`);
         console.log(`  forename: ${payload.forename ? payload.forename.length : 0}`);
         console.log(`  title: ${payload.title ? payload.title.length : 0}`);
         console.log(`  gender: ${payload.gender ? payload.gender.length : 0}`);
         console.log(`  address.street: ${payload.address.street ? payload.address.street.length : 0}`);
         console.log(`  address.city: ${payload.address.city ? payload.address.city.length : 0}`);
-        console.log(`  address.county: ${payload.address.county ? payload.address.county.length : 0}`); // Log county length
+        console.log(`  address.county: ${payload.address.county ? payload.address.county.length : 0}`); 
         console.log(`  address.postcode: ${payload.address.postcode ? payload.address.postcode.length : 0}`);
-        console.log(`  phone.home: ${payload.phone.home ? payload.phone.home.length : 0}`); // Log home phone length
+        console.log(`  phone.home: ${payload.phone.home ? payload.phone.home.length : 0}`); 
         console.log(`  phone.mobile: ${payload.phone.mobile ? payload.phone.mobile.length : 0}`);
-        console.log(`  phone.work: ${payload.phone.work ? payload.phone.work.length : 0}`); // Log work phone length
+        console.log(`  phone.work: ${payload.phone.work ? payload.phone.work.length : 0}`); 
         console.log(`  email: ${payload.email ? payload.email.length : 0}`);
         // --- End Log lengths ---
 
