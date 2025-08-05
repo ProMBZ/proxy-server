@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: false }));
 // If not set, the hardcoded defaults will be used (less secure for production).
 const SFD_BASE_URL = process.env.SFD_BASE_URL || 'https://sfd.co:6500';
 const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
-const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
+const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // Corrected Client Secret based on previous logs
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
 const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '0a8f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
@@ -264,24 +264,53 @@ app.post('/api/createPatient', async (req, res) => {
         console.log(`[createPatient] Using provided patient_title: ${patient_title}`);
     }
 
+    // Sanitize patient_phone: remove any non-digit characters
+    const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
+    console.log(`[createPatient] Original patient_phone: ${patient_phone}, Sanitized: ${sanitized_patient_phone}`);
+
+    // --- Temporary Truncation for Debugging 'string right truncation' ---
+    // These truncations are for diagnostic purposes. Adjust or remove once the problematic field is identified.
+    // Increased lengths slightly to be less aggressive while still testing for truncation.
+    const final_surname = surname ? surname.substring(0, 20) : ''; // Truncate surname
+    const final_forename = forename ? forename.substring(0, 20) : ''; // Truncate forename
+    const final_address_street = address_street ? address_street.substring(0, 50) : ''; // Truncate street
+    const final_address_city = address_city ? address_city.substring(0, 30) : ''; // Truncate city
+    const final_address_postcode = address_postcode ? address_postcode.substring(0, 10) : ''; // Truncate postcode (UK postcodes are max 8 chars including space)
+    const final_patient_email = patient_email ? patient_email.substring(0, 40) : ''; // Truncate email
+    // --- End Temporary Truncation ---
+
     try {
         const payload = {
-            surname,
-            forename,
+            surname: final_surname, 
+            forename: final_forename, 
             title: patient_title, 
             gender: patient_sex,
             dob,
             address: { // Nested object for address
-                street: address_street,
-                city: address_city,
-                postcode: address_postcode
+                street: final_address_street, 
+                city: final_address_city, 
+                postcode: final_address_postcode
             },
             phone: { // Nested object for phone
-                mobile: patient_phone // Assuming patient_phone is mobile
+                mobile: sanitized_patient_phone // Use sanitized phone number
             },
-            email: patient_email
+            email: final_patient_email
         };
-        console.log(`[createPatient] Sending to SFD API (${SFD_BASE_URL}/patient/register) with payload:`, JSON.stringify(payload));
+
+        // --- Log lengths of string fields in the final payload ---
+        console.log(`[createPatient] Payload String Lengths:`);
+        console.log(`  surname: ${payload.surname ? payload.surname.length : 0}`);
+        console.log(`  forename: ${payload.forename ? payload.forename.length : 0}`);
+        console.log(`  title: ${payload.title ? payload.title.length : 0}`);
+        console.log(`  gender: ${payload.gender ? payload.gender.length : 0}`);
+        console.log(`  address.street: ${payload.address.street ? payload.address.street.length : 0}`);
+        console.log(`  address.city: ${payload.address.city ? payload.address.city.length : 0}`);
+        console.log(`  address.postcode: ${payload.address.postcode ? payload.address.postcode.length : 0}`);
+        console.log(`  phone.mobile: ${payload.phone.mobile ? payload.phone.mobile.length : 0}`);
+        console.log(`  email: ${payload.email ? payload.email.length : 0}`);
+        // --- End Log lengths ---
+
+        console.log(`[createPatient] Final Payload to SFD API:`, JSON.stringify(payload));
         console.time('[createPatient] SFD API Call Duration');
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, 
             payload,
@@ -464,14 +493,25 @@ function handleProxyError(error, res, toolCallId) {
     if (error.code === 'ECONNABORTED') {
         console.error('This was a timeout error. The request took too long to complete.');
     }
-    if (error.response) {
-        console.error(`Error Response Status:`, error.response.status);
-        console.error(`Error Response Data:`, error.response.data);
-    } else if (error.request) {
-        console.error('Error Request: The request was made but no response was received.');
-        console.error('Request details:', error.request);
+    if (axios.isAxiosError(error)) {
+        if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            console.error(`Error Response Status:`, error.response.status);
+            console.error(`Error Response Data:`, error.response.data);
+            console.error(`Error Response Headers:`, error.response.headers);
+        } else if (error.request) {
+            // The request was made but no response was received
+            // `error.request` is an instance of XMLHttpRequest in the browser and an http.ClientRequest in node.js
+            console.error('Error Request: The request was made but no response was received.');
+            console.error('Request details:', error.request);
+        } else {
+            // Something happened in setting up the request that triggered an Error
+            console.error('Error Config:', error.config);
+        }
     } else {
-        console.error('Error Config:', error.config);
+        // Any other non-Axios error
+        console.error('Non-Axios Error:', error);
     }
     console.error(`--- End [PROXY] Internal Error Catch Block ---`);
 
