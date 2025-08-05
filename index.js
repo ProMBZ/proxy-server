@@ -77,8 +77,8 @@ async function acquireOrRefreshToken(forceRefresh = false) {
                 grant_type: 'password',
                 client_id: SFD_CLIENT_ID,
                 client_secret: SFD_CLIENT_SECRET,
-                username: 'C5WH', // Placeholder
-                password: 'jaVathee123!', // Placeholder
+                username: 'C5WH', // Placeholder: Replace with actual username if using password grant
+                password: 'jaVathee123!', // Placeholder: Replace with actual password if using password grant
             };
             console.log('[AUTH] Attempting OAuth2 password grant...');
         } else { // grantTypeToUse === 'refresh_token'
@@ -117,6 +117,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
 
             console.log('[AUTH] OAuth2 token acquisition successful. Validating new token...');
 
+            // Validate the token by making a simple request to a protected endpoint
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
                 validateStatus: (status) => status >= 200 && status < 500, // Handle non-2xx status
@@ -126,6 +127,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
             if (testResponse.status === 200) {
                 console.log('[AUTH] New access token successfully validated.');
                 tokenStore.accessToken = tokenData.access_token;
+                // Set expiry time 5 minutes before actual expiry for proactive refresh
                 tokenStore.expiresAt = Date.now() + (tokenData.expires_in * 1000) - (5 * 60 * 1000);
                 if (tokenData.refresh_token) {
                     tokenStore.refreshToken = tokenData.refresh_token;
@@ -142,6 +144,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
         }
     } catch (error) {
         console.error('[AUTH] Error during token acquisition/refresh:', error.message);
+        // Clear tokens on failure to force re-acquisition next time
         tokenStore.accessToken = null;
         tokenStore.refreshToken = null;
         tokenStore.expiresAt = null;
@@ -151,6 +154,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
 
 // --- Helper function to handle SFD responses and format for Vapi ---
 function handleSfdResponse(sfdResponse, res, toolCallId) {
+    // Check for HTTP errors (4xx, 5xx) or explicit API errors in the response data
     if (sfdResponse.status >= 400 || (sfdResponse.data && sfdResponse.data.error)) {
         console.error('--- [SFD API] Error Response ---');
         console.error('Status:', sfdResponse.status);
@@ -160,42 +164,47 @@ function handleSfdResponse(sfdResponse, res, toolCallId) {
         if (sfdResponse.data && typeof sfdResponse.data === 'object' && sfdResponse.data.error && sfdResponse.data.error.description) {
             errorMessage += ` Description: ${sfdResponse.data.error.description}`;
         } else if (sfdResponse.data) {
+            // If data is present but not a structured error, stringify it
             errorMessage += ` Raw response: ${JSON.stringify(sfdResponse.data)}`;
         } else if (sfdResponse.statusText) {
             errorMessage += ` Status Text: ${sfdResponse.statusText}`;
         }
 
+        // Format the error for Vapi's expected response structure
         const vapiErrorResponse = {
             results: [{
                 toolCallId: toolCallId,
-                error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500)
+                error: errorMessage.replace(/[\r\n]+/g, ' ').substring(0, 500) // Sanitize and truncate error message
             }]
         };
-        return res.status(200).json(vapiErrorResponse);
+        return res.status(200).json(vapiErrorResponse); // Always return 200 for Vapi webhooks, error is in 'error' field
     }
 
     console.log('--- [SFD API] Success Response ---');
     console.log('Status:', sfdResponse.status);
     console.log('Data:', sfdResponse.data);
 
+    // Stringify the successful response data for Vapi
     const resultString = JSON.stringify(sfdResponse.data);
 
+    // Format the success for Vapi's expected response structure
     const vapiSuccessResponse = {
         results: [{
             toolCallId: toolCallId,
-            result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500)
+            result: resultString.replace(/[\r\n]+/g, ' ').substring(0, 500) // Sanitize and truncate result
         }]
     };
     return res.status(200).json(vapiSuccessResponse);
 }
 
 // --- Middleware for all /api/* routes ---
+// This middleware ensures a valid token is available before any tool endpoint is hit.
 app.use('/api/*', async (req, res, next) => {
     try {
         const tokenAcquired = await acquireOrRefreshToken();
         if (!tokenAcquired) {
             console.error('[PROXY_MIDDLEWARE] Failed to obtain valid access token. Aborting request.');
-            const toolCallId = req.body.toolCallId || 'default_tool_call_id';
+            const toolCallId = req.body.toolCallId || 'default_tool_call_id'; // Fallback toolCallId
             return res.status(200).json({
                 results: [{
                     toolCallId: toolCallId,
@@ -203,8 +212,9 @@ app.use('/api/*', async (req, res, next) => {
                 }]
             });
         }
+        // Attach the Authorization header for the upcoming API call
         req.headers.authorization = `Bearer ${tokenStore.accessToken}`;
-        next();
+        next(); // Proceed to the specific tool route handler
     } catch (error) {
         console.error('[PROXY_MIDDLEWARE] Error during token acquisition in middleware:', error.message);
         const toolCallId = req.body.toolCallId || 'default_tool_call_id';
@@ -223,20 +233,25 @@ app.use('/api/*', async (req, res, next) => {
 // POST: /api/createPatient
 app.post('/api/createPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { forename, surname, dob, patient_email, patient_phone, address_street, address_city, address_postcode, patient_sex, patient_title } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { forename, surname, dob, patient_email, patient_phone, address_street, address_city, address_postcode, patient_sex, patient_title } = req.body;
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
-            forename,
             surname,
+            forename,
+            title: patient_title,
+            gender: patient_sex,
             dob,
-            patient_email,
-            patient_phone,
-            'address.street': address_street,
-            'address.city': address_city,
-            'address.postcode': address_postcode,
-            patient_sex,
-            patient_title
+            address: { // Nested object for address
+                street: address_street,
+                city: address_city,
+                postcode: address_postcode
+            },
+            phone: { // Nested object for phone
+                mobile: patient_phone // Assuming patient_phone is mobile
+            },
+            email: patient_email
         }, { headers: { Authorization: req.headers.authorization } });
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
@@ -247,11 +262,12 @@ app.post('/api/createPatient', async (req, res) => {
 // POST: /api/searchPatient
 app.post('/api/searchPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { forename, surname, dob } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { forename, surname, dob } = req.body;
     
     try {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
-            params: { forename, surname, dob },
+            params: { forename, surname, dob }, // Parameters for GET request
             headers: { Authorization: req.headers.authorization }
         });
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -263,7 +279,8 @@ app.post('/api/searchPatient', async (req, res) => {
 // POST: /api/getAvailableDates
 app.post('/api/getAvailableDates', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { year, month, app_rsn_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { year, month, app_rsn_id } = req.body;
 
     try {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
@@ -279,7 +296,8 @@ app.post('/api/getAvailableDates', async (req, res) => {
 // POST: /api/getAvailableTimes
 app.post('/api/getAvailableTimes', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { date, app_rsn_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { date, app_rsn_id } = req.body;
 
     try {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
@@ -295,7 +313,8 @@ app.post('/api/getAvailableTimes', async (req, res) => {
 // POST: /api/reserveSlot
 app.post('/api/reserveSlot', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { date, time, app_rsn_id, patient_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { date, time, app_rsn_id, patient_id } = req.body;
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, {
@@ -313,7 +332,8 @@ app.post('/api/reserveSlot', async (req, res) => {
 // POST: /api/bookAppointment
 app.post('/api/bookAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { app_rec_id, patient_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { app_rec_id, patient_id } = req.body;
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, {
@@ -329,7 +349,8 @@ app.post('/api/bookAppointment', async (req, res) => {
 // POST: /api/cancelAppointment
 app.post('/api/cancelAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { app_rec_id, app_can_id, patient_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { app_rec_id, app_can_id, patient_id } = req.body;
 
     try {
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, {
@@ -346,7 +367,8 @@ app.post('/api/cancelAppointment', async (req, res) => {
 // POST: /api/getPatientAppointments
 app.post('/api/getPatientAppointments', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    const { patient_id } = req.body.toolArgs;
+    // Corrected: Destructure directly from req.body, not req.body.toolArgs
+    const { patient_id } = req.body;
 
     try {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
@@ -360,6 +382,7 @@ app.post('/api/getPatientAppointments', async (req, res) => {
 });
 
 // --- Simple Test Endpoint for Proxy Status ---
+// You can visit this URL directly in your browser to check if the proxy server is running.
 app.get('/', (req, res) => {
     res.send('CORS Proxy is running and token management is active.');
 });
@@ -380,13 +403,17 @@ function handleProxyError(error, res, toolCallId) {
             error: `Proxy internal error: ${error.message}. Check proxy logs for more details.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
         }]
     };
+    // Always return 200 for Vapi webhooks, the error is communicated in the 'error' field
     return res.status(200).json(vapiErrorResponse);
 }
 
 // --- Server Start and Initial Token Acquisition ---
+// When the server starts, it immediately tries to get an initial access token.
+// This ensures the proxy is ready to serve requests with a valid token from the beginning.
 app.listen(PORT, async () => {
     console.log(`Proxy server listening on port ${PORT}`);
     console.log('[INIT] Attempting initial token acquisition...');
+    // Attempt to acquire/refresh token. It will prioritize INITIAL_REFRESH_TOKEN if available.
     const initialTokenAcquired = await acquireOrRefreshToken();
     if (!initialTokenAcquired) {
         console.error('[INIT] Initial token acquisition failed. Proxy might not function correctly until a valid token is obtained. Please ensure INITIAL_REFRESH_TOKEN env var is valid.');
