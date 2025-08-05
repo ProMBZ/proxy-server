@@ -250,9 +250,19 @@ app.post('/api/createPatient', async (req, res) => {
     } = req.body;
 
     // Handle the patient_title, checking for both 'patient_title' and 'patient_title\n'
-    const patient_title = req.body.patient_title || req.body['patient_title\n'] || '';
+    // Ensure it's a string, trim it, and if still empty, default to "Mr.".
+    let patient_title_raw = req.body.patient_title || req.body['patient_title\n'];
+    let patient_title = (typeof patient_title_raw === 'string' ? patient_title_raw.trim() : '');
+
+    if (patient_title === '') {
+        patient_title = 'Mr.'; // Default to "Mr." if title is empty or not provided after trimming
+        console.log(`[createPatient] patient_title was empty after trimming, defaulting to: ${patient_title}`);
+    } else {
+        console.log(`[createPatient] Using provided patient_title: ${patient_title}`);
+    }
 
     try {
+        console.log(`[createPatient] Sending to SFD API: title=${patient_title}, gender=${patient_sex}, dob=${dob}, etc.`);
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, {
             surname,
             forename,
