@@ -271,23 +271,25 @@ app.post('/api/createPatient', async (req, res) => {
     const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
     console.log(`[createPatient] Original patient_phone: ${patient_phone}, Sanitized: ${sanitized_patient_phone}`);
 
-    // --- Temporary Truncation for Debugging 'string right truncation' ---
+    // --- Aggressive Truncation for all string fields ---
     // These truncations are for diagnostic purposes. Adjust or remove once the problematic field is identified.
-    // Increased lengths slightly to be less aggressive while still testing for truncation.
-    const final_surname = surname ? surname.substring(0, 20) : ''; // Truncate surname
-    const final_forename = forename ? forename.substring(0, 20) : ''; // Truncate forename
-    const final_address_street = address_street ? address_street.substring(0, 50) : ''; // Truncate street
-    const final_address_city = address_city ? address_city.substring(0, 30) : ''; // Truncate city
-    const final_address_postcode = address_postcode ? address_postcode.substring(0, 10) : ''; // Truncate postcode (UK postcodes are max 8 chars including space)
-    const final_patient_email = patient_email ? patient_email.substring(0, 40) : ''; // Truncate email
-    // --- End Temporary Truncation ---
+    const final_surname = surname ? String(surname).substring(0, 15) : ''; // Truncate surname to 15 chars
+    const final_forename = forename ? String(forename).substring(0, 15) : ''; // Truncate forename to 15 chars
+    const final_patient_title = patient_title ? String(patient_title).substring(0, 5) : ''; // Truncate title to 5 chars (e.g., Mr., Ms., Dr.)
+    const final_patient_sex = patient_sex ? String(patient_sex).substring(0, 10) : ''; // Truncate sex to 10 chars (e.g., male, female)
+    const final_address_street = address_street ? String(address_street).substring(0, 40) : ''; // Truncate street to 40 chars
+    const final_address_city = address_city ? String(address_city).substring(0, 25) : ''; // Truncate city to 25 chars
+    const final_address_postcode = address_postcode ? String(address_postcode).substring(0, 9) : ''; // Truncate postcode to 9 chars (UK postcodes are max 8 chars including space)
+    const final_patient_phone_mobile = sanitized_patient_phone ? String(sanitized_patient_phone).substring(0, 15) : ''; // Truncate phone to 15 digits
+    const final_patient_email = patient_email ? String(patient_email).substring(0, 30) : ''; // Truncate email to 30 chars
+    // --- End Aggressive Truncation ---
 
     try {
         const payload = {
             surname: final_surname, 
             forename: final_forename, 
-            title: patient_title, 
-            gender: patient_sex,
+            title: final_patient_title, // Use truncated title
+            gender: final_patient_sex, // Use truncated sex
             dob,
             address: { // Nested object for address
                 street: final_address_street, 
@@ -295,13 +297,13 @@ app.post('/api/createPatient', async (req, res) => {
                 postcode: final_address_postcode
             },
             phone: { // Nested object for phone
-                mobile: sanitized_patient_phone // Use sanitized phone number
+                mobile: final_patient_phone_mobile // Use truncated phone number
             },
             email: final_patient_email
         };
 
         // --- Log lengths of string fields in the final payload ---
-        console.log(`[createPatient] Payload String Lengths:`);
+        console.log(`[createPatient] Final Payload String Lengths:`);
         console.log(`  surname: ${payload.surname ? payload.surname.length : 0}`);
         console.log(`  forename: ${payload.forename ? payload.forename.length : 0}`);
         console.log(`  title: ${payload.title ? payload.title.length : 0}`);
