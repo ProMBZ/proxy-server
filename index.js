@@ -20,7 +20,10 @@ app.use(express.urlencoded({ extended: false }));
 // If not set, the hardcoded defaults will be used (less secure for production).
 const SFD_BASE_URL = process.env.SFD_BASE_URL || 'https://sfd.co:6500';
 const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
-const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a'; // Corrected Client Secret based on previous logs
+// !!! IMPORTANT: VERIFY AND UPDATE THIS CLIENT SECRET !!!
+// This value MUST match the current Client Secret provided by SFD for your Client ID.
+// Ideally, set this as an environment variable on Render.com.
+const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a'; 
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
 const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || '0a8f1e79fedd4c7888b8422c559e04d8ab49c875414a4f3f83f3ac76e582dd83'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
@@ -104,7 +107,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Accept': 'application/json'
                 },
-                timeout: 30000 // Increased timeout to 30 seconds for token request
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             }
         );
         console.timeEnd('[AUTH] Token Request Duration');
@@ -123,7 +126,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
                 validateStatus: (status) => status >= 200 && status < 500, // Handle non-2xx status
-                timeout: 30000 // Increased timeout to 30 seconds for validation
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             });
             console.timeEnd('[AUTH] Token Validation Request Duration');
 
@@ -316,7 +319,7 @@ app.post('/api/createPatient', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 30000 // Increased timeout to 30 seconds
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             }
         );
         console.timeEnd('[createPatient] SFD API Call Duration');
@@ -338,7 +341,7 @@ app.post('/api/searchPatient', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
             params: params, // Parameters for GET request
             headers: { Authorization: req.headers.authorization },
-            timeout: 30000 // Increased timeout to 30 seconds
+            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
         });
         console.timeEnd('[searchPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -359,7 +362,7 @@ app.post('/api/getAvailableDates', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 30000 // Increased timeout to 30 seconds
+            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
         });
         console.timeEnd('[getAvailableDates] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -380,7 +383,7 @@ app.post('/api/getAvailableTimes', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 30000 // Increased timeout to 30 seconds
+            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
         });
         console.timeEnd('[getAvailableTimes] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -402,7 +405,7 @@ app.post('/api/reserveSlot', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 30000 // Increased timeout to 30 seconds
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             }
         );
         console.timeEnd('[reserveSlot] SFD API Call Duration');
@@ -425,7 +428,7 @@ app.post('/api/bookAppointment', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 30000 // Increased timeout to 30 seconds
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             }
         );
         console.timeEnd('[bookAppointment] SFD API Call Duration');
@@ -448,7 +451,7 @@ app.post('/api/cancelAppointment', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 30000 // Increased timeout to 30 seconds
+                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
             }
         );
         console.timeEnd('[cancelAppointment] SFD API Call Duration');
@@ -470,7 +473,7 @@ app.post('/api/getPatientAppointments', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 30000 // Increased timeout to 30 seconds
+            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
         });
         console.timeEnd('[getPatientAppointments] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
