@@ -107,7 +107,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Accept': 'application/json'
                 },
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             }
         );
         console.timeEnd('[AUTH] Token Request Duration');
@@ -126,7 +126,7 @@ async function acquireOrRefreshToken(forceRefresh = false) {
             const testResponse = await axios.get(`${SFD_BASE_URL}/Practice`, {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
                 validateStatus: (status) => status >= 200 && status < 500, // Handle non-2xx status
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             });
             console.timeEnd('[AUTH] Token Validation Request Duration');
 
@@ -233,6 +233,24 @@ app.use('/api/*', async (req, res, next) => {
     }
 });
 
+// Helper function to format date to YYYY-MM-DD
+function formatDateToYYYYMMDD(dateString) {
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) {
+            console.warn(`[formatDateToYYYYMMDD] Invalid date string provided: ${dateString}. Returning original.`);
+            return dateString; // Return original if invalid
+        }
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    } catch (e) {
+        console.error(`[formatDateToYYYYMMDD] Error formatting date "${dateString}": ${e.message}`);
+        return dateString; // Fallback to original
+    }
+}
+
 // --- Specific API Endpoints for each Vapi Tool ---
 // Each tool has its own dedicated route to handle its specific request format.
 
@@ -255,6 +273,61 @@ app.post('/api/createPatient', async (req, res) => {
         patient_sex, 
     } = req.body;
 
+    // --- CRITICAL DATA VALIDATION ---
+    // This is the fix for the "string right truncation" error and Vapi's transcription issues.
+    // We now check for both missing data and data that is too long.
+    const validationErrors = [];
+
+    // Validation for forename
+    if (!forename || forename.trim() === '') {
+        validationErrors.push('The patient\'s first name is missing. Could you please provide it?');
+    } else if (forename.length > 50) {
+        validationErrors.push('The patient\'s first name is too long. Could you please provide a shorter one?');
+    }
+
+    // Validation for surname
+    if (!surname || surname.trim() === '') {
+        validationErrors.push('The patient\'s last name is missing. Could you please provide it?');
+    } else if (surname.length > 50) {
+        validationErrors.push('The patient\'s last name is too long. Could you please provide a shorter one?');
+    }
+    
+    // Validation for date of birth
+    if (!dob || dob.trim() === '') {
+        validationErrors.push('The patient\'s date of birth is missing. Could you please provide it?');
+    } else if (dob.length > 100) { // A very generous length check for a date string
+        validationErrors.push('The patient\'s date of birth seems too long. Can you please provide it again?');
+    }
+
+    // Validation for street address
+    if (address_street && address_street.length > 100) {
+        validationErrors.push('The street address is too long. Could you please provide a shorter one?');
+    }
+
+    // Validation for city
+    if (address_city && address_city.length > 50) {
+        validationErrors.push('The city name is too long. Could you please provide a shorter one?');
+    }
+    
+    // Validation for postcode
+    if (address_postcode && address_postcode.length > 10) { // Max length for UK postcodes is 8, so 10 is safe.
+        validationErrors.push('The postcode is too long. Could you please provide a shorter one?');
+    }
+
+    // If there are any validation errors, return them to Vapi immediately.
+    if (validationErrors.length > 0) {
+        console.error(`[createPatient] Data Validation Failed. Errors:`, validationErrors);
+        // Concatenate errors into a single string for Vapi
+        const errorMessage = `I'm having trouble with some of the patient information. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
+    // --- END CRITICAL DATA VALIDATION ---
+
     // Handle the patient_title, checking for both 'patient_title' and 'patient_title\n'
     // Ensure it's a string, trim it, and if still empty, default to "Mr.".
     let patient_title_raw = req.body.patient_title || req.body['patient_title\n'];
@@ -271,50 +344,33 @@ app.post('/api/createPatient', async (req, res) => {
     const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
     console.log(`[createPatient] Original patient_phone: ${patient_phone}, Sanitized: ${sanitized_patient_phone}`);
 
-    // --- DEEP DIVE TRUNCATION: Set all string fields to very small lengths for testing ---
-    // The goal is to get a successful response first, then increase lengths one by one.
-    const TRUNCATION_LENGTH = 1; // Start with 1 character for all fields
-
-    const final_surname = surname ? String(surname).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_forename = forename ? String(forename).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_patient_title = patient_title ? String(patient_title).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_patient_sex = patient_sex ? String(patient_sex).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_address_street = address_street ? String(address_street).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_address_city = address_city ? String(address_city).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_address_postcode = address_postcode ? String(address_postcode).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_patient_phone_mobile = sanitized_patient_phone ? String(sanitized_patient_phone).substring(0, TRUNCATION_LENGTH) : ''; 
-    const final_patient_email = patient_email ? String(patient_email).substring(0, TRUNCATION_LENGTH) : ''; 
-    
-    // Fields from Postman collection review, also truncated to TRUNCATION_LENGTH
-    const final_address_county = ''; // Default to empty string, SFD API might expect this field
-    const final_phone_home = ''; // Default to empty string
-    const final_phone_work = ''; // Default to empty string
-
-    // --- End DEEP DIVE TRUNCATION ---
+    // Format DOB to YYYY-MM-DD
+    const formatted_dob = formatDateToYYYYMMDD(dob);
+    console.log(`[createPatient] Original DOB: ${dob}, Formatted DOB: ${formatted_dob}`);
 
     try {
         const payload = {
-            surname: final_surname, 
-            forename: final_forename, 
-            title: final_patient_title, 
-            gender: final_patient_sex, 
-            dob,
-            address: { 
-                street: final_address_street, 
-                city: final_address_city, 
-                county: final_address_county, 
-                postcode: final_address_postcode
+            surname: surname || '', // Ensure it's a string, default to empty
+            forename: forename || '', // Ensure it's a string, default to empty
+            title: patient_title, 
+            gender: patient_sex || '', // Ensure it's a string, default to empty
+            dob: formatted_dob, // Use formatted DOB
+            address: { // Nested object for address
+                street: address_street || '', // Ensure it's a string, default to empty
+                city: address_city || '', // Ensure it's a string, default to empty
+                county: '', // Added, default to empty string as per Postman collection
+                postcode: address_postcode || '' // Ensure it's a string, default to empty
             },
-            phone: { 
-                home: final_phone_home, 
-                mobile: final_patient_phone_mobile, 
-                work: final_phone_work 
+            phone: { // Nested object for phone
+                home: '', // Added, default to empty string as per Postman collection
+                mobile: sanitized_patient_phone, // Use sanitized phone number
+                work: '' // Added, default to empty string as per Postman collection
             },
-            email: final_patient_email
+            email: patient_email || '' // Ensure it's a string, default to empty
         };
 
         // --- Log lengths of string fields in the final payload for debugging ---
-        console.log(`[createPatient] Final Payload String Lengths (Deep Dive Test):`);
+        console.log(`[createPatient] Final Payload String Lengths:`);
         console.log(`  surname: ${payload.surname ? payload.surname.length : 0}`);
         console.log(`  forename: ${payload.forename ? payload.forename.length : 0}`);
         console.log(`  title: ${payload.title ? payload.title.length : 0}`);
@@ -335,7 +391,7 @@ app.post('/api/createPatient', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             }
         );
         console.timeEnd('[createPatient] SFD API Call Duration');
@@ -351,13 +407,17 @@ app.post('/api/searchPatient', async (req, res) => {
     const { forename, surname, dob } = req.body;
     
     try {
-        const params = { forename, surname, dob };
+        const params = { 
+            forename: forename || '', 
+            surname: surname || '', 
+            dob: formatDateToYYYYMMDD(dob) 
+        };
         console.log(`[searchPatient] Sending to SFD API (${SFD_BASE_URL}/patient/search) with params:`, JSON.stringify(params));
         console.time('[searchPatient] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
             params: params, // Parameters for GET request
             headers: { Authorization: req.headers.authorization },
-            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
         });
         console.timeEnd('[searchPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -372,13 +432,17 @@ app.post('/api/getAvailableDates', async (req, res) => {
     const { year, month, app_rsn_id } = req.body;
 
     try {
-        const params = { year, month, app_rsn_id };
+        const params = { 
+            year: year || '', 
+            month: month || '', 
+            app_rsn_id: app_rsn_id || '' 
+        };
         console.log(`[getAvailableDates] Sending to SFD API (${SFD_BASE_URL}/appointment/dates) with params:`, JSON.stringify(params));
         console.time('[getAvailableDates] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
         });
         console.timeEnd('[getAvailableDates] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -393,13 +457,16 @@ app.post('/api/getAvailableTimes', async (req, res) => {
     const { date, app_rsn_id } = req.body;
 
     try {
-        const params = { date, app_rsn_id };
+        const params = { 
+            date: formatDateToYYYYMMDD(date), 
+            app_rsn_id: app_rsn_id || '' 
+        };
         console.log(`[getAvailableTimes] Sending to SFD API (${SFD_BASE_URL}/appointment/times) with params:`, JSON.stringify(params));
         console.time('[getAvailableTimes] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
         });
         console.timeEnd('[getAvailableTimes] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -414,14 +481,19 @@ app.post('/api/reserveSlot', async (req, res) => {
     const { date, time, app_rsn_id, patient_id } = req.body;
 
     try {
-        const payload = { date, time, app_rsn_id, patient_id };
+        const payload = { 
+            date: formatDateToYYYYMMDD(date), 
+            time: time || '', 
+            app_rsn_id: app_rsn_id || '', 
+            patient_id: patient_id || '' 
+        };
         console.log(`[reserveSlot] Sending to SFD API (${SFD_BASE_URL}/appointment/reserve) with payload:`, JSON.stringify(payload));
         console.time('[reserveSlot] SFD API Call Duration');
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, 
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             }
         );
         console.timeEnd('[reserveSlot] SFD API Call Duration');
@@ -437,14 +509,17 @@ app.post('/api/bookAppointment', async (req, res) => {
     const { app_rec_id, patient_id } = req.body;
 
     try {
-        const payload = { app_rec_id, patient_id };
+        const payload = { 
+            app_rec_id: app_rec_id || '', 
+            patient_id: patient_id || '' 
+        };
         console.log(`[bookAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/book) with payload:`, JSON.stringify(payload));
         console.time('[bookAppointment] SFD API Call Duration');
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, 
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             }
         );
         console.timeEnd('[bookAppointment] SFD API Call Duration');
@@ -460,14 +535,18 @@ app.post('/api/cancelAppointment', async (req, res) => {
     const { app_rec_id, app_can_id, patient_id } = req.body;
 
     try {
-        const payload = { app_rec_id, app_can_id, patient_id };
+        const payload = { 
+            app_rec_id: app_rec_id || '', 
+            app_can_id: app_can_id || '', 
+            patient_id: patient_id || '' 
+        };
         console.log(`[cancelAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/cancel) with payload:`, JSON.stringify(payload));
         console.time('[cancelAppointment] SFD API Call Duration');
         const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, 
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
             }
         );
         console.timeEnd('[cancelAppointment] SFD API Call Duration');
@@ -483,13 +562,13 @@ app.post('/api/getPatientAppointments', async (req, res) => {
     const { patient_id } = req.body;
 
     try {
-        const params = { patient_id };
+        const params = { patient_id: patient_id || '' };
         console.log(`[getPatientAppointments] Sending to SFD API (${SFD_BASE_URL}/patient/appointments/current) with params:`, JSON.stringify(params));
         console.time('[getPatientAppointments] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 90000 // Increased timeout to 1.5 minutes (90 seconds)
+            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
         });
         console.timeEnd('[getPatientAppointments] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
