@@ -257,10 +257,8 @@ function formatDateToYYYYMMDD(dateString) {
 // POST: /api/createPatient
 app.post('/api/createPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
-    // Log the incoming request body to debug what Vapi is sending
     console.log(`[createPatient] Received req.body:`, req.body);
 
-    // Destructure directly from req.body
     const { 
         forename, 
         surname, 
@@ -273,51 +271,34 @@ app.post('/api/createPatient', async (req, res) => {
         patient_sex, 
     } = req.body;
 
-    // --- CRITICAL DATA VALIDATION ---
-    // This is the fix for the "string right truncation" error and Vapi's transcription issues.
-    // We now check for both missing data and data that is too long.
     const validationErrors = [];
-
-    // Validation for forename
     if (!forename || forename.trim() === '') {
         validationErrors.push('The patient\'s first name is missing. Could you please provide it?');
     } else if (forename.length > 50) {
         validationErrors.push('The patient\'s first name is too long. Could you please provide a shorter one?');
     }
-
-    // Validation for surname
     if (!surname || surname.trim() === '') {
         validationErrors.push('The patient\'s last name is missing. Could you please provide it?');
     } else if (surname.length > 50) {
         validationErrors.push('The patient\'s last name is too long. Could you please provide a shorter one?');
     }
-    
-    // Validation for date of birth
     if (!dob || dob.trim() === '') {
         validationErrors.push('The patient\'s date of birth is missing. Could you please provide it?');
-    } else if (dob.length > 100) { // A very generous length check for a date string
+    } else if (dob.length > 100) { 
         validationErrors.push('The patient\'s date of birth seems too long. Can you please provide it again?');
     }
-
-    // Validation for street address
     if (address_street && address_street.length > 100) {
         validationErrors.push('The street address is too long. Could you please provide a shorter one?');
     }
-
-    // Validation for city
     if (address_city && address_city.length > 50) {
         validationErrors.push('The city name is too long. Could you please provide a shorter one?');
     }
-    
-    // Validation for postcode
-    if (address_postcode && address_postcode.length > 10) { // Max length for UK postcodes is 8, so 10 is safe.
+    if (address_postcode && address_postcode.length > 10) { 
         validationErrors.push('The postcode is too long. Could you please provide a shorter one?');
     }
 
-    // If there are any validation errors, return them to Vapi immediately.
     if (validationErrors.length > 0) {
         console.error(`[createPatient] Data Validation Failed. Errors:`, validationErrors);
-        // Concatenate errors into a single string for Vapi
         const errorMessage = `I'm having trouble with some of the patient information. ` + validationErrors.join(' ');
         return res.status(200).json({
             results: [{
@@ -326,64 +307,36 @@ app.post('/api/createPatient', async (req, res) => {
             }]
         });
     }
-    // --- END CRITICAL DATA VALIDATION ---
 
-    // Handle the patient_title, checking for both 'patient_title' and 'patient_title\n'
-    // Ensure it's a string, trim it, and if still empty, default to "Mr.".
     let patient_title_raw = req.body.patient_title || req.body['patient_title\n'];
     let patient_title = (typeof patient_title_raw === 'string' ? patient_title_raw.trim() : '');
-
     if (patient_title === '') {
-        patient_title = 'Mr.'; // Default to "Mr." if title is empty or not provided after trimming
-        console.log(`[createPatient] patient_title was empty after trimming, defaulting to: ${patient_title}`);
-    } else {
-        console.log(`[createPatient] Using provided patient_title: ${patient_title}`);
+        patient_title = 'Mr.'; 
     }
 
-    // Sanitize patient_phone: remove any non-digit characters
     const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
-    console.log(`[createPatient] Original patient_phone: ${patient_phone}, Sanitized: ${sanitized_patient_phone}`);
-
-    // Format DOB to YYYY-MM-DD
     const formatted_dob = formatDateToYYYYMMDD(dob);
-    console.log(`[createPatient] Original DOB: ${dob}, Formatted DOB: ${formatted_dob}`);
 
     try {
         const payload = {
-            surname: surname || '', // Ensure it's a string, default to empty
-            forename: forename || '', // Ensure it's a string, default to empty
+            surname: surname || '', 
+            forename: forename || '', 
             title: patient_title, 
-            gender: patient_sex || '', // Ensure it's a string, default to empty
-            dob: formatted_dob, // Use formatted DOB
-            address: { // Nested object for address
-                street: address_street || '', // Ensure it's a string, default to empty
-                city: address_city || '', // Ensure it's a string, default to empty
-                county: '', // Added, default to empty string as per Postman collection
-                postcode: address_postcode || '' // Ensure it's a string, default to empty
+            gender: patient_sex || '', 
+            dob: formatted_dob, 
+            address: { 
+                street: address_street || '', 
+                city: address_city || '', 
+                county: '', 
+                postcode: address_postcode || '' 
             },
-            phone: { // Nested object for phone
-                home: '', // Added, default to empty string as per Postman collection
-                mobile: sanitized_patient_phone, // Use sanitized phone number
-                work: '' // Added, default to empty string as per Postman collection
+            phone: { 
+                home: '', 
+                mobile: sanitized_patient_phone, 
+                work: '' 
             },
-            email: patient_email || '' // Ensure it's a string, default to empty
+            email: patient_email || '' 
         };
-
-        // --- Log lengths of string fields in the final payload for debugging ---
-        console.log(`[createPatient] Final Payload String Lengths:`);
-        console.log(`  surname: ${payload.surname ? payload.surname.length : 0}`);
-        console.log(`  forename: ${payload.forename ? payload.forename.length : 0}`);
-        console.log(`  title: ${payload.title ? payload.title.length : 0}`);
-        console.log(`  gender: ${payload.gender ? payload.gender.length : 0}`);
-        console.log(`  address.street: ${payload.address.street ? payload.address.street.length : 0}`);
-        console.log(`  address.city: ${payload.address.city ? payload.address.city.length : 0}`);
-        console.log(`  address.county: ${payload.address.county ? payload.address.county.length : 0}`); 
-        console.log(`  address.postcode: ${payload.address.postcode ? payload.address.postcode.length : 0}`);
-        console.log(`  phone.home: ${payload.phone.home ? payload.phone.home.length : 0}`); 
-        console.log(`  phone.mobile: ${payload.phone.mobile ? payload.phone.mobile.length : 0}`);
-        console.log(`  phone.work: ${payload.phone.work ? payload.phone.work.length : 0}`); 
-        console.log(`  email: ${payload.email ? payload.email.length : 0}`);
-        // --- End Log lengths ---
 
         console.log(`[createPatient] Final Payload to SFD API:`, JSON.stringify(payload));
         console.time('[createPatient] SFD API Call Duration');
@@ -391,12 +344,13 @@ app.post('/api/createPatient', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+                timeout: 1800000 
             }
         );
         console.timeEnd('[createPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
     } catch (error) {
+        console.error('[createPatient] Caught an error in the try block.');
         return handleProxyError(error, res, toolCallId);
     }
 });
@@ -406,6 +360,29 @@ app.post('/api/searchPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { forename, surname, dob } = req.body;
     
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!forename || forename.trim() === '') {
+        validationErrors.push('The patient\'s first name is missing.');
+    }
+    if (!surname || surname.trim() === '') {
+        validationErrors.push('The patient\'s last name is missing.');
+    }
+    if (!dob || dob.trim() === '') {
+        validationErrors.push('The patient\'s date of birth is missing.');
+    }
+
+    if (validationErrors.length > 0) {
+        console.error(`[searchPatient] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to search for the patient. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
+
     try {
         const params = { 
             forename: forename || '', 
@@ -415,9 +392,9 @@ app.post('/api/searchPatient', async (req, res) => {
         console.log(`[searchPatient] Sending to SFD API (${SFD_BASE_URL}/patient/search) with params:`, JSON.stringify(params));
         console.time('[searchPatient] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
-            params: params, // Parameters for GET request
+            params: params, 
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+            timeout: 1800000 
         });
         console.timeEnd('[searchPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -430,6 +407,29 @@ app.post('/api/searchPatient', async (req, res) => {
 app.post('/api/getAvailableDates', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { year, month, app_rsn_id } = req.body;
+    
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!year || isNaN(parseInt(year, 10))) {
+        validationErrors.push('The year is missing or not a valid number.');
+    }
+    if (!month || isNaN(parseInt(month, 10))) {
+        validationErrors.push('The month is missing or not a valid number.');
+    }
+    if (!app_rsn_id) {
+        validationErrors.push('The appointment reason ID is missing.');
+    }
+
+    if (validationErrors.length > 0) {
+        console.error(`[getAvailableDates] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to find available dates. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
 
     try {
         const params = { 
@@ -442,7 +442,7 @@ app.post('/api/getAvailableDates', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+            timeout: 1800000 
         });
         console.timeEnd('[getAvailableDates] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -455,6 +455,26 @@ app.post('/api/getAvailableDates', async (req, res) => {
 app.post('/api/getAvailableTimes', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { date, app_rsn_id } = req.body;
+    
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!date || date.trim() === '') {
+        validationErrors.push('The appointment date is missing.');
+    }
+    if (!app_rsn_id) {
+        validationErrors.push('The appointment reason ID is missing.');
+    }
+
+    if (validationErrors.length > 0) {
+        console.error(`[getAvailableTimes] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to find available times. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
 
     try {
         const params = { 
@@ -466,7 +486,7 @@ app.post('/api/getAvailableTimes', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+            timeout: 1800000 
         });
         console.timeEnd('[getAvailableTimes] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -479,6 +499,32 @@ app.post('/api/getAvailableTimes', async (req, res) => {
 app.post('/api/reserveSlot', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { date, time, app_rsn_id, patient_id } = req.body;
+
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!date || date.trim() === '') {
+        validationErrors.push('The appointment date is missing.');
+    }
+    if (!time || time.trim() === '') {
+        validationErrors.push('The appointment time is missing.');
+    }
+    if (!app_rsn_id) {
+        validationErrors.push('The appointment reason ID is missing.');
+    }
+    if (!patient_id) {
+        validationErrors.push('The patient ID is missing.');
+    }
+    
+    if (validationErrors.length > 0) {
+        console.error(`[reserveSlot] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to reserve the slot. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
 
     try {
         const payload = { 
@@ -493,7 +539,7 @@ app.post('/api/reserveSlot', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+                timeout: 1800000 
             }
         );
         console.timeEnd('[reserveSlot] SFD API Call Duration');
@@ -508,6 +554,26 @@ app.post('/api/bookAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { app_rec_id, patient_id } = req.body;
 
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!app_rec_id) {
+        validationErrors.push('The appointment record ID is missing.');
+    }
+    if (!patient_id) {
+        validationErrors.push('The patient ID is missing.');
+    }
+
+    if (validationErrors.length > 0) {
+        console.error(`[bookAppointment] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to book the appointment. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
+
     try {
         const payload = { 
             app_rec_id: app_rec_id || '', 
@@ -519,7 +585,7 @@ app.post('/api/bookAppointment', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+                timeout: 1800000 
             }
         );
         console.timeEnd('[bookAppointment] SFD API Call Duration');
@@ -533,6 +599,29 @@ app.post('/api/bookAppointment', async (req, res) => {
 app.post('/api/cancelAppointment', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { app_rec_id, app_can_id, patient_id } = req.body;
+    
+    // --- New: Added validation for this endpoint ---
+    const validationErrors = [];
+    if (!app_rec_id) {
+        validationErrors.push('The appointment record ID is missing.');
+    }
+    if (!app_can_id) {
+        validationErrors.push('The cancellation reason ID is missing.');
+    }
+    if (!patient_id) {
+        validationErrors.push('The patient ID is missing.');
+    }
+
+    if (validationErrors.length > 0) {
+        console.error(`[cancelAppointment] Data Validation Failed. Errors:`, validationErrors);
+        const errorMessage = `I'm missing some required information to cancel the appointment. ` + validationErrors.join(' ');
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
 
     try {
         const payload = { 
@@ -546,7 +635,7 @@ app.post('/api/cancelAppointment', async (req, res) => {
             payload,
             { 
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+                timeout: 1800000 
             }
         );
         console.timeEnd('[cancelAppointment] SFD API Call Duration');
@@ -560,6 +649,18 @@ app.post('/api/cancelAppointment', async (req, res) => {
 app.post('/api/getPatientAppointments', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     const { patient_id } = req.body;
+    
+    // --- New: Added validation for this endpoint ---
+    if (!patient_id) {
+        console.error(`[getPatientAppointments] Data Validation Failed: patient_id is missing.`);
+        const errorMessage = 'I need the patient ID to look up their appointments. Could you please provide it?';
+        return res.status(200).json({
+            results: [{
+                toolCallId: toolCallId,
+                error: errorMessage
+            }]
+        });
+    }
 
     try {
         const params = { patient_id: patient_id || '' };
@@ -568,7 +669,7 @@ app.post('/api/getPatientAppointments', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 // Increased timeout to 30 minutes (1,800,000 milliseconds)
+            timeout: 1800000 
         });
         console.timeEnd('[getPatientAppointments] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -593,22 +694,16 @@ function handleProxyError(error, res, toolCallId) {
     }
     if (axios.isAxiosError(error)) {
         if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
             console.error(`Error Response Status:`, error.response.status);
             console.error(`Error Response Data:`, error.response.data);
             console.error(`Error Response Headers:`, error.response.headers);
         } else if (error.request) {
-            // The request was made but no response was received
-            // `error.request` is an instance of XMLHttpRequest in the browser and an http.ClientRequest in node.js
             console.error('Error Request: The request was made but no response was received.');
             console.error('Request details:', error.request);
         } else {
-            // Something happened in setting up the request that triggered an Error
             console.error('Error Config:', error.config);
         }
     } else {
-        // Any other non-Axios error
         console.error('Non-Axios Error:', error);
     }
     console.error(`--- End [PROXY] Internal Error Catch Block ---`);
@@ -619,17 +714,13 @@ function handleProxyError(error, res, toolCallId) {
             error: `Proxy internal error: ${error.message}. Check proxy logs for more details.`.replace(/[\r\n]+/g, ' ').substring(0, 500)
         }]
     };
-    // Always return 200 for Vapi webhooks, the error is communicated in the 'error' field
     return res.status(200).json(vapiErrorResponse);
 }
 
 // --- Server Start and Initial Token Acquisition ---
-// When the server starts, it immediately tries to get an initial access token.
-// This ensures the proxy is ready to serve requests with a valid token from the beginning.
 app.listen(PORT, async () => {
     console.log(`Proxy server listening on port ${PORT}`);
     console.log('[INIT] Attempting initial token acquisition...');
-    // Attempt to acquire/refresh token. It will prioritize INITIAL_REFRESH_TOKEN if available.
     const initialTokenAcquired = await acquireOrRefreshToken();
     if (!initialTokenAcquired) {
         console.error('[INIT] Initial token acquisition failed. Proxy might not function correctly until a valid token is obtained. Please ensure INITIAL_REFRESH_TOKEN env var is valid.');
