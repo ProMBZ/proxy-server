@@ -1,11 +1,12 @@
 {
   "name": "sfd-cors-proxy",
   "version": "1.0.0",
-  "description": "A CORS proxy for the SFD API with automated token refresh and file-based storage.",
+  "description": "A CORS proxy for the SFD API with automated token refresh and in-memory token storage.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon index.js",
+    "test": "echo \"No tests implemented yet.\""
   },
   "keywords": [
     "cors",
@@ -15,15 +16,19 @@
     "sfd",
     "token-refresh"
   ],
-  "author": "",
+  "author": "Your Name or Organization",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "axios": "^1.7.2",
+    "axios-retry": "^3.5.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.0",
-    "express": "^4.19.2",
-    "qs": "^6.11.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "qs": "^6.14.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
   },
   "engines": {
     "node": "18.x"
