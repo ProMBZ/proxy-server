@@ -23,7 +23,7 @@ const SFD_CLIENT_ID = process.env.SFD_CLIENT_ID || 'betterproducts';
 // !!! IMPORTANT: VERIFY AND UPDATE THIS CLIENT SECRET !!!
 // This value MUST match the current Client Secret provided by SFD for your Client ID.
 // Ideally, set this as an environment variable on Render.com.
-const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a'; 
+const SFD_CLIENT_SECRET = process.env.SFD_CLIENT_SECRET || '574f1383-8d69-49b4-a6a5-e969cbc9a99a';
 // This initial refresh token is CRUCIAL for the first startup or after a restart
 // where in-memory tokens are lost. Ensure it's a valid, long-lived refresh token.
 const INITIAL_REFRESH_TOKEN = process.env.INITIAL_REFRESH_TOKEN || 'bac407898e4a4320a0245c43a42bbe5fc8d0affb76084173847e30f3d4c810cc'; // *** IMPORTANT: Replace with a real, fresh refresh token ***
@@ -259,16 +259,16 @@ app.post('/api/createPatient', async (req, res) => {
     const toolCallId = req.body.toolCallId;
     console.log(`[createPatient] Received req.body:`, req.body);
 
-    const { 
-        forename, 
-        surname, 
-        dob, 
-        patient_email, 
-        patient_phone, 
-        address_street, 
-        address_city, 
-        address_postcode, 
-        patient_sex, 
+    const {
+        forename,
+        surname,
+        dob,
+        patient_email,
+        patient_phone,
+        address_street,
+        address_city,
+        address_postcode,
+        patient_sex,
     } = req.body;
 
     const validationErrors = [];
@@ -284,7 +284,7 @@ app.post('/api/createPatient', async (req, res) => {
     }
     if (!dob || dob.trim() === '') {
         validationErrors.push('The patient\'s date of birth is missing. Could you please provide it?');
-    } else if (dob.length > 100) { 
+    } else if (dob.length > 100) {
         validationErrors.push('The patient\'s date of birth seems too long. Can you please provide it again?');
     }
     if (address_street && address_street.length > 100) {
@@ -293,8 +293,13 @@ app.post('/api/createPatient', async (req, res) => {
     if (address_city && address_city.length > 50) {
         validationErrors.push('The city name is too long. Could you please provide a shorter one?');
     }
-    if (address_postcode && address_postcode.length > 10) { 
+    if (address_postcode && address_postcode.length > 10) {
         validationErrors.push('The postcode is too long. Could you please provide a shorter one?');
+    }
+    
+    // Check if the patient_sex is provided, and if it is, validate its length
+    if (patient_sex && patient_sex.length > 6) {
+        validationErrors.push('The patient\'s gender is too long. Could you please provide a shorter one?');
     }
 
     if (validationErrors.length > 0) {
@@ -311,40 +316,54 @@ app.post('/api/createPatient', async (req, res) => {
     let patient_title_raw = req.body.patient_title || req.body['patient_title\n'];
     let patient_title = (typeof patient_title_raw === 'string' ? patient_title_raw.trim() : '');
     if (patient_title === '') {
-        patient_title = 'Mr.'; 
+        patient_title = 'Mr.';
     }
+
+    // --- FIX START: Mapping gender to a shorter, valid value ---
+    let sfdGender = '';
+    if (patient_sex) {
+        const lowerCaseGender = patient_sex.toLowerCase().trim();
+        if (lowerCaseGender.startsWith('f')) {
+            sfdGender = 'FEML';
+        } else if (lowerCaseGender.startsWith('m')) {
+            sfdGender = 'MALE';
+        } else {
+            sfdGender = 'OTH'; // 'OTH' for other, or an empty string if not applicable
+        }
+    }
+    // --- FIX END ---
 
     const sanitized_patient_phone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
     const formatted_dob = formatDateToYYYYMMDD(dob);
 
     try {
         const payload = {
-            surname: surname || '', 
-            forename: forename || '', 
-            title: patient_title, 
-            gender: patient_sex || '', 
-            dob: formatted_dob, 
-            address: { 
-                street: address_street || '', 
-                city: address_city || '', 
-                county: '', 
-                postcode: address_postcode || '' 
+            surname: surname || '',
+            forename: forename || '',
+            title: patient_title,
+            gender: sfdGender, // Use the new, mapped gender value
+            dob: formatted_dob,
+            address: {
+                street: address_street || '',
+                city: address_city || '',
+                county: '',
+                postcode: address_postcode || ''
             },
-            phone: { 
-                home: '', 
-                mobile: sanitized_patient_phone, 
-                work: '' 
+            phone: {
+                home: '',
+                mobile: sanitized_patient_phone,
+                work: ''
             },
-            email: patient_email || '' 
+            email: patient_email || ''
         };
 
         console.log(`[createPatient] Final Payload to SFD API:`, JSON.stringify(payload));
         console.time('[createPatient] SFD API Call Duration');
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, 
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`,
             payload,
-            { 
+            {
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 
+                timeout: 1800000
             }
         );
         console.timeEnd('[createPatient] SFD API Call Duration');
@@ -384,17 +403,17 @@ app.post('/api/searchPatient', async (req, res) => {
     }
 
     try {
-        const params = { 
-            forename: forename || '', 
-            surname: surname || '', 
-            dob: formatDateToYYYYMMDD(dob) 
+        const params = {
+            forename: forename || '',
+            surname: surname || '',
+            dob: formatDateToYYYYMMDD(dob)
         };
         console.log(`[searchPatient] Sending to SFD API (${SFD_BASE_URL}/patient/search) with params:`, JSON.stringify(params));
         console.time('[searchPatient] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/search`, {
-            params: params, 
+            params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 
+            timeout: 1800000
         });
         console.timeEnd('[searchPatient] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -432,17 +451,17 @@ app.post('/api/getAvailableDates', async (req, res) => {
     }
 
     try {
-        const params = { 
-            year: year || '', 
-            month: month || '', 
-            app_rsn_id: app_rsn_id || '' 
+        const params = {
+            year: year || '',
+            month: month || '',
+            app_rsn_id: app_rsn_id || ''
         };
         console.log(`[getAvailableDates] Sending to SFD API (${SFD_BASE_URL}/appointment/dates) with params:`, JSON.stringify(params));
         console.time('[getAvailableDates] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/dates`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 
+            timeout: 1800000
         });
         console.timeEnd('[getAvailableDates] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -477,16 +496,16 @@ app.post('/api/getAvailableTimes', async (req, res) => {
     }
 
     try {
-        const params = { 
-            date: formatDateToYYYYMMDD(date), 
-            app_rsn_id: app_rsn_id || '' 
+        const params = {
+            date: formatDateToYYYYMMDD(date),
+            app_rsn_id: app_rsn_id || ''
         };
         console.log(`[getAvailableTimes] Sending to SFD API (${SFD_BASE_URL}/appointment/times) with params:`, JSON.stringify(params));
         console.time('[getAvailableTimes] SFD API Call Duration');
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/times`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 
+            timeout: 1800000
         });
         console.timeEnd('[getAvailableTimes] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
@@ -514,7 +533,7 @@ app.post('/api/reserveSlot', async (req, res) => {
     if (!patient_id) {
         validationErrors.push('The patient ID is missing.');
     }
-    
+
     if (validationErrors.length > 0) {
         console.error(`[reserveSlot] Data Validation Failed. Errors:`, validationErrors);
         const errorMessage = `I'm missing some required information to reserve the slot. ` + validationErrors.join(' ');
@@ -527,19 +546,19 @@ app.post('/api/reserveSlot', async (req, res) => {
     }
 
     try {
-        const payload = { 
-            date: formatDateToYYYYMMDD(date), 
-            time: time || '', 
-            app_rsn_id: app_rsn_id || '', 
-            patient_id: patient_id || '' 
+        const payload = {
+            date: formatDateToYYYYMMDD(date),
+            time: time || '',
+            app_rsn_id: app_rsn_id || '',
+            patient_id: patient_id || ''
         };
         console.log(`[reserveSlot] Sending to SFD API (${SFD_BASE_URL}/appointment/reserve) with payload:`, JSON.stringify(payload));
         console.time('[reserveSlot] SFD API Call Duration');
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`, 
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/reserve`,
             payload,
-            { 
+            {
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 
+                timeout: 1800000
             }
         );
         console.timeEnd('[reserveSlot] SFD API Call Duration');
@@ -575,17 +594,17 @@ app.post('/api/bookAppointment', async (req, res) => {
     }
 
     try {
-        const payload = { 
-            app_rec_id: app_rec_id || '', 
-            patient_id: patient_id || '' 
+        const payload = {
+            app_rec_id: app_rec_id || '',
+            patient_id: patient_id || ''
         };
         console.log(`[bookAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/book) with payload:`, JSON.stringify(payload));
         console.time('[bookAppointment] SFD API Call Duration');
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`, 
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/book`,
             payload,
-            { 
+            {
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 
+                timeout: 1800000
             }
         );
         console.timeEnd('[bookAppointment] SFD API Call Duration');
@@ -624,18 +643,18 @@ app.post('/api/cancelAppointment', async (req, res) => {
     }
 
     try {
-        const payload = { 
-            app_rec_id: app_rec_id || '', 
-            app_can_id: app_can_id || '', 
-            patient_id: patient_id || '' 
+        const payload = {
+            app_rec_id: app_rec_id || '',
+            app_can_id: app_can_id || '',
+            patient_id: patient_id || ''
         };
         console.log(`[cancelAppointment] Sending to SFD API (${SFD_BASE_URL}/appointment/cancel) with payload:`, JSON.stringify(payload));
         console.time('[cancelAppointment] SFD API Call Duration');
-        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`, 
+        const sfdResponse = await axios.post(`${SFD_BASE_URL}/appointment/cancel`,
             payload,
-            { 
+            {
                 headers: { Authorization: req.headers.authorization },
-                timeout: 1800000 
+                timeout: 1800000
             }
         );
         console.timeEnd('[cancelAppointment] SFD API Call Duration');
@@ -669,7 +688,7 @@ app.post('/api/getPatientAppointments', async (req, res) => {
         const sfdResponse = await axios.get(`${SFD_BASE_URL}/patient/appointments/current`, {
             params: params,
             headers: { Authorization: req.headers.authorization },
-            timeout: 1800000 
+            timeout: 1800000
         });
         console.timeEnd('[getPatientAppointments] SFD API Call Duration');
         return handleSfdResponse(sfdResponse, res, toolCallId);
