@@ -239,7 +239,7 @@ app.post('/api/createPatient', async (req, res) => {
   }
 
   const sfdGender = patient_sex
-    ? patient_sex.toLowerCase().startsWith('f') ? 'F' // Changed to 'F' to avoid potential truncation
+    ? patient_sex.toLowerCase().startsWith('f') ? 'F'
     : patient_sex.toLowerCase().startsWith('m') ? 'M' : 'O'
     : '';
   const sanitizedPhone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
@@ -366,6 +366,37 @@ app.post('/api/getAvailableTimes', async (req, res) => {
       timeout: 10000,
     });
     console.timeEnd('[getAvailableTimes] SFD API');
+    return handleSfdResponse(sfdResponse, res, toolCallId);
+  } catch (error) {
+    return handleProxyError(error, res, toolCallId);
+  }
+});
+
+app.post('/api/getAvailableBooks', async (req, res) => {
+  const toolCallId = req.body.toolCallId;
+  const { date, app_rsn_id } = req.body;
+
+  const errors = validateFields(
+    { date: 'Date', app_rsn_id: 'Appointment reason ID' },
+    req.body
+  );
+
+  if (errors.length > 0) {
+    return res.status(200).json({
+      results: [{ toolCallId, error: `Invalid input: ${errors.join(' ')}` }],
+    });
+  }
+
+  try {
+    const params = { date: formatDateToYYYYMMDD(date), app_rsn_id };
+    console.log('[getAvailableBooks] Params:', params);
+    console.time('[getAvailableBooks] SFD API');
+    const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/books`, {
+      params,
+      headers: { Authorization: req.headers.authorization },
+      timeout: 10000,
+    });
+    console.timeEnd('[getAvailableBooks] SFD API');
     return handleSfdResponse(sfdResponse, res, toolCallId);
   } catch (error) {
     return handleProxyError(error, res, toolCallId);
