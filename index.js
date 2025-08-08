@@ -239,8 +239,8 @@ app.post('/api/createPatient', async (req, res) => {
   }
 
   const sfdGender = patient_sex
-    ? patient_sex.toLowerCase().startsWith('f') ? 'FEML'
-    : patient_sex.toLowerCase().startsWith('m') ? 'MALE' : 'OTH'
+    ? patient_sex.toLowerCase().startsWith('f') ? 'F' // Changed to 'F' to avoid potential truncation
+    : patient_sex.toLowerCase().startsWith('m') ? 'M' : 'O'
     : '';
   const sanitizedPhone = patient_phone ? String(patient_phone).replace(/\D/g, '') : '';
   const formattedDob = formatDateToYYYYMMDD(dob);
@@ -264,7 +264,7 @@ app.post('/api/createPatient', async (req, res) => {
 
     console.log('[createPatient] Payload:', payload);
     console.time('[createPatient] SFD API');
-    const s personally = await axios.post(`${SFD_BASE_URL}/patient/register`, payload, {
+    const sfdResponse = await axios.post(`${SFD_BASE_URL}/patient/register`, payload, {
       headers: { Authorization: req.headers.authorization },
       timeout: 10000,
     });
