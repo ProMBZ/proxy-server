@@ -394,27 +394,18 @@ app.get('/api/Users', async (req, res) => {
   }
 });
 
-app.post('/api/getAvailableBooks', async (req, res) => {
+// New route to handle GET requests for available books
+// As per the Postman collection, the API endpoint is `/appointment/books` and the method is GET.
+app.get('/api/getAvailableBooks', async (req, res) => {
   const toolCallId = req.body.toolCallId;
-  const { date, app_rsn_id } = req.body;
 
-  const errors = validateFields(
-    { date: 'Date', app_rsn_id: 'Appointment reason ID' },
-    req.body
-  );
-
-  if (errors.length > 0) {
-    return res.status(200).json({
-      results: [{ toolCallId, error: `Invalid input: ${errors.join(' ')}` }],
-    });
-  }
+  // The Postman collection for "GET Appointment Books" does not show any query parameters,
+  // so we are not expecting any here.
 
   try {
-    const params = { date: formatDateToYYYYMMDD(date), app_rsn_id };
-    console.log('[getAvailableBooks] Params:', params);
+    console.log('[getAvailableBooks] GET request to SFD API...');
     console.time('[getAvailableBooks] SFD API');
     const sfdResponse = await axios.get(`${SFD_BASE_URL}/appointment/books`, {
-      params,
       headers: { Authorization: req.headers.authorization },
       timeout: 10000,
     });
@@ -424,6 +415,7 @@ app.post('/api/getAvailableBooks', async (req, res) => {
     return handleProxyError(error, res, toolCallId);
   }
 });
+
 
 app.post('/api/reserveSlot', async (req, res) => {
   const toolCallId = req.body.toolCallId;
